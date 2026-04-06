@@ -16,8 +16,21 @@ interface ExportStatus {
   serviceAccountEmail: string;
 }
 
-async function exportToSheets(): Promise<ExportResult> {
-  const res = await fetch('/api/export/sheets', { method: 'POST' });
+interface ExportData {
+  tokens?: Array<{ symbol: string; name: string; balance: string; priceUsd: number; valueUsd: number }>;
+  transactions?: Array<{
+    timestamp: string; wallet_label?: string; wallet_address: string; chain: string;
+    type: string; token_symbol: string; value: string; value_usd: number;
+    from_address: string; to_address: string; hash: string;
+  }>;
+}
+
+async function exportToSheets(data?: ExportData): Promise<ExportResult> {
+  const res = await fetch('/api/export/sheets', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data || {}),
+  });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.details || err.error || 'Failed to export');
@@ -46,7 +59,7 @@ async function fetchExportStatus(): Promise<ExportStatus> {
 export function useExport() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: exportToSheets,
+    mutationFn: (data?: ExportData) => exportToSheets(data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['exportStatus'] });
     },
@@ -57,6 +70,19 @@ export function useConfigureSheet() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: configureSheet,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['exportStatus'] });
+    },
+  });
+}
+
+export function useDisconnectSheet() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/export/disconnect', { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to disconnect');
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['exportStatus'] });
     },

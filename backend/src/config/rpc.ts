@@ -12,5 +12,6 @@ export const config = {
   googleServiceAccountEmail: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '',
   googlePrivateKey: (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
   googleSpreadsheetId: process.env.GOOGLE_SPREADSHEET_ID || '',
+  moralisApiKey: process.env.MORALIS_API_KEY || '',
   port: parseInt(process.env.PORT || '3001', 10),
 };

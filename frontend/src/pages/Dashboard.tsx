@@ -1,13 +1,92 @@
+import { useState, useMemo, useCallback } from 'react';
 import { usePortfolio } from '../hooks/usePortfolio';
 import { useTransactions } from '../hooks/useTransactions';
 import WalletCard from '../components/WalletCard';
 import TokenTable from '../components/TokenTable';
 import TransactionTable from '../components/TransactionTable';
 import ExportButton from '../components/ExportButton';
+import DateRangeFilter, { makePresetRange, type DateRange } from '../components/DateRangeFilter';
 
 export default function Dashboard() {
   const { data: portfolios, isLoading, error } = usePortfolio();
   const { data: transactions, isLoading: txLoading } = useTransactions();
+  const [dateRange, setDateRange] = useState<DateRange>(() => makePresetRange(28));
+  const [disabledWallets, setDisabledWallets] = useState<Set<number>>(new Set());
+
+  const toggleWallet = useCallback((id: number) => {
+    setDisabledWallets(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  // Active portfolios (checkbox enabled)
+  const activePortfolios = useMemo(() => {
+    if (!portfolios) return [];
+    return portfolios.filter(p => !disabledWallets.has(p.wallet.id));
+  }, [portfolios, disabledWallets]);
+
+  // Active wallet IDs for transaction filtering
+  const activeWalletIds = useMemo(() => {
+    return new Set(activePortfolios.map(p => p.wallet.id));
+  }, [activePortfolios]);
+
+  // Aggregate tokens only from active wallets
+  const aggregatedTokens = useMemo(() => {
+    const allTokens = activePortfolios.flatMap(p => p.tokens);
+    const tokenMap = new Map<string, typeof allTokens[0]>();
+    for (const token of allTokens) {
+      const key = token.address;
+      const existing = tokenMap.get(key);
+      if (existing) {
+        tokenMap.set(key, {
+          ...existing,
+          balanceFormatted: existing.balanceFormatted + token.balanceFormatted,
+          valueUsd: existing.valueUsd + token.valueUsd,
+        });
+      } else {
+        tokenMap.set(key, { ...token });
+      }
+    }
+    return Array.from(tokenMap.values());
+  }, [activePortfolios]);
+
+  // Filter transactions by date range + active wallets
+  const filteredTxs = useMemo(() => {
+    if (!transactions) return [];
+    return transactions.filter(tx => {
+      if (!tx.timestamp) return false;
+      if (!activeWalletIds.has(tx.wallet_id)) return false;
+      const ts = new Date(tx.timestamp).getTime();
+      return ts >= dateRange.from.getTime() && ts <= dateRange.to.getTime();
+    });
+  }, [transactions, dateRange, activeWalletIds]);
+
+  // Prepare export data
+  const exportData = useMemo(() => ({
+    tokens: aggregatedTokens.map(t => ({
+      symbol: t.symbol,
+      name: t.name,
+      balance: t.balanceFormatted.toLocaleString('ru-RU', { maximumFractionDigits: 6 }),
+      priceUsd: t.priceUsd,
+      valueUsd: t.valueUsd,
+    })),
+    transactions: filteredTxs.map(tx => ({
+      timestamp: tx.timestamp,
+      wallet_label: tx.wallet_label || undefined,
+      wallet_address: tx.wallet_address,
+      chain: tx.chain,
+      type: tx.type,
+      token_symbol: tx.token_symbol,
+      value: tx.value,
+      value_usd: tx.value_usd,
+      from_address: tx.from_address,
+      to_address: tx.to_address,
+      hash: tx.hash,
+    })),
+  }), [aggregatedTokens, filteredTxs]);
 
   if (isLoading) {
     return (
@@ -36,25 +115,7 @@ export default function Dashboard() {
     );
   }
 
-  const totalValue = portfolios.reduce((sum, p) => sum + p.totalValueUsd, 0);
-  const allTokens = portfolios.flatMap(p => p.tokens);
-
-  // Aggregate tokens by address
-  const tokenMap = new Map<string, typeof allTokens[0]>();
-  for (const token of allTokens) {
-    const key = `${token.address}`;
-    const existing = tokenMap.get(key);
-    if (existing) {
-      tokenMap.set(key, {
-        ...existing,
-        balanceFormatted: existing.balanceFormatted + token.balanceFormatted,
-        valueUsd: existing.valueUsd + token.valueUsd,
-      });
-    } else {
-      tokenMap.set(key, { ...token });
-    }
-  }
-  const aggregatedTokens = Array.from(tokenMap.values());
+  const totalValue = activePortfolios.reduce((sum, p) => sum + p.totalValueUsd, 0);
 
   return (
     <div className="space-y-8">
@@ -63,36 +124,38 @@ export default function Dashboard() {
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">Portfolio</h1>
           <p className="mt-1 text-3xl font-bold text-gray-900">
-            ${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            ${totalValue.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </p>
         </div>
-        <ExportButton />
+        <div className="flex items-center gap-3">
+          <DateRangeFilter value={dateRange} onChange={setDateRange} />
+          <ExportButton exportData={exportData} />
+        </div>
       </div>
 
       {/* Wallet Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {portfolios.map(p => (
-          <WalletCard key={p.wallet.id} portfolio={p} />
+          <WalletCard
+            key={p.wallet.id}
+            portfolio={p}
+            active={!disabledWallets.has(p.wallet.id)}
+            onToggle={toggleWallet}
+          />
         ))}
       </div>
 
       {/* All Tokens Table */}
-      <div>
-        <h2 className="mb-4 text-lg font-semibold text-gray-900">All Tokens</h2>
-        <TokenTable tokens={aggregatedTokens} />
-      </div>
+      <TokenTable tokens={aggregatedTokens} />
 
       {/* Transactions */}
-      <div>
-        <h2 className="mb-4 text-lg font-semibold text-gray-900">Recent Transactions</h2>
-        {txLoading ? (
-          <div className="flex items-center justify-center py-10">
-            <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
-          </div>
-        ) : (
-          <TransactionTable transactions={transactions || []} />
-        )}
-      </div>
+      {txLoading ? (
+        <div className="flex items-center justify-center py-10">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
+        </div>
+      ) : (
+        <TransactionTable transactions={filteredTxs} />
+      )}
     </div>
   );
 }

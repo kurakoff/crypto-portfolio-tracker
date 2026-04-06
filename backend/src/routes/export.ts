@@ -24,12 +24,10 @@ router.post('/configure', (req: Request, res: Response) => {
     return;
   }
 
-  // Extract spreadsheet ID from URL or raw ID
   let spreadsheetId = spreadsheetUrl;
   const match = spreadsheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
   if (match) spreadsheetId = match[1];
 
-  // Save to exports table (will be used as the target)
   const existing = db.prepare('SELECT * FROM exports ORDER BY id DESC LIMIT 1').get() as any;
   const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}`;
 
@@ -44,10 +42,17 @@ router.post('/configure', (req: Request, res: Response) => {
   res.json({ ok: true, spreadsheetId, spreadsheetUrl: url });
 });
 
-// POST /api/export/sheets — run export
-router.post('/sheets', async (_req: Request, res: Response) => {
+// DELETE /api/export/disconnect — unlink spreadsheet
+router.delete('/disconnect', (_req: Request, res: Response) => {
+  db.prepare('DELETE FROM exports').run();
+  res.json({ ok: true });
+});
+
+// POST /api/export/sheets — run export with optional filtered data from frontend
+router.post('/sheets', async (req: Request, res: Response) => {
   try {
-    const result = await exportToSheets();
+    const { tokens, transactions } = req.body || {};
+    const result = await exportToSheets({ tokens, transactions });
     res.json(result);
   } catch (err: any) {
     console.error('Export error:', err);

@@ -4,8 +4,12 @@ import { cache } from '../cache/memory-cache';
 import { getEvmPortfolio, getEvmChainConfig } from '../services/ethereum';
 import { getSolanaPortfolio } from '../services/solana';
 import { getTronPortfolio } from '../services/tron';
-import { getTokenPrices, getNativePrice } from '../services/prices';
-import { getDexScreenerPrices } from '../services/dexscreener';
+import { getNativePrice, getTokenPrices } from '../services/prices';
+import {
+  isMoralisEnabled,
+  isMoralisChain,
+  getWalletTokens,
+} from '../services/moralis';
 
 const router = Router();
 
@@ -50,12 +54,11 @@ const NATIVE_COIN_IDS: Record<string, string> = {
   solana: 'solana',
 };
 
-// Chain -> CoinGecko platform id for token prices
-const COINGECKO_PLATFORMS: Record<string, string> = {
-  ethereum: 'ethereum',
-  bsc: 'binance-smart-chain',
-  tron: 'tron',
-  solana: 'solana',
+const NATIVE_SYMBOLS: Record<string, { symbol: string; name: string }> = {
+  ethereum: { symbol: 'ETH', name: 'Ethereum' },
+  bsc: { symbol: 'BNB', name: 'BNB' },
+  tron: { symbol: 'TRX', name: 'Tron' },
+  solana: { symbol: 'SOL', name: 'Solana' },
 };
 
 // GET /api/portfolio
@@ -105,6 +108,65 @@ router.get('/:walletId', async (req: Request, res: Response) => {
 });
 
 async function fetchWalletPortfolio(wallet: Wallet): Promise<WalletPortfolio> {
+  // Use Moralis for supported EVM chains
+  if (isMoralisEnabled() && isMoralisChain(wallet.chain)) {
+    return fetchMoralisPortfolio(wallet);
+  }
+
+  // Fallback to existing implementations
+  return fetchLegacyPortfolio(wallet);
+}
+
+/**
+ * Moralis-powered portfolio — single API gives tokens + prices + logos.
+ * /wallets/{address}/tokens returns both native + ERC-20 in one call.
+ */
+async function fetchMoralisPortfolio(wallet: Wallet): Promise<WalletPortfolio> {
+  const moralisTokens = await getWalletTokens(wallet.chain, wallet.address);
+
+  const nativeInfo = NATIVE_SYMBOLS[wallet.chain] || { symbol: '?', name: '?' };
+
+  // Map all tokens (native + ERC-20) from Moralis
+  const allTokens = moralisTokens.map(t => {
+    const isNative = t.native_token === true ||
+      t.token_address === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+
+    const balFormatted = parseFloat(t.balance_formatted || '0') ||
+      parseFloat(t.balance) / Math.pow(10, t.decimals);
+    const priceUsd = t.usd_price || 0;
+
+    return {
+      address: isNative ? 'native' : t.token_address,
+      symbol: isNative ? nativeInfo.symbol : t.symbol,
+      name: isNative ? nativeInfo.name : t.name,
+      decimals: t.decimals,
+      balance: t.balance,
+      balanceFormatted: balFormatted,
+      logoUri: t.logo || t.thumbnail || undefined,
+      priceUsd,
+      valueUsd: balFormatted * priceUsd,
+    };
+  });
+
+  const nativeToken = allTokens.find(t => t.address === 'native');
+  const nativeBalance = nativeToken?.balanceFormatted || 0;
+  const totalValueUsd = allTokens.reduce((sum, t) => sum + t.valueUsd, 0);
+
+  console.log(`[moralis:${wallet.chain}] ${wallet.address.slice(0, 8)}... — ${allTokens.length} tokens, $${totalValueUsd.toFixed(2)}`);
+
+  return {
+    wallet,
+    nativeBalance,
+    tokens: allTokens,
+    nfts: [],
+    totalValueUsd,
+  };
+}
+
+/**
+ * Legacy portfolio for non-Moralis chains (Tron, Solana) or when Moralis is disabled.
+ */
+async function fetchLegacyPortfolio(wallet: Wallet): Promise<WalletPortfolio> {
   let tokens: TokenBalance[] = [];
   let nfts: NFTItem[] = [];
   let nativeBalance = 0;
@@ -130,27 +192,20 @@ async function fetchWalletPortfolio(wallet: Wallet): Promise<WalletPortfolio> {
   const nativeCoinId = NATIVE_COIN_IDS[wallet.chain] || 'ethereum';
   const nativePrice = await getNativePrice(nativeCoinId);
 
-  const tokenAddresses = tokens
-    .filter(t => t.address !== 'native')
-    .map(t => t.address);
-
-  const platform = COINGECKO_PLATFORMS[wallet.chain] || 'ethereum';
-  const tokenPrices = tokenAddresses.length > 0
-    ? await getTokenPrices(platform, tokenAddresses)
+  // Token prices via CoinGecko
+  const COINGECKO_PLATFORMS: Record<string, string> = {
+    ethereum: 'ethereum', bsc: 'binance-smart-chain', tron: 'tron', solana: 'solana',
+  };
+  const tokenAddrs = tokens.filter(t => t.address !== 'native').map(t => t.address);
+  const platform = COINGECKO_PLATFORMS[wallet.chain];
+  const tokenPrices = platform && tokenAddrs.length > 0
+    ? await getTokenPrices(platform, tokenAddrs)
     : {};
 
-  // Find tokens without CoinGecko price — try DexScreener
-  const missingPriceAddrs = tokenAddresses.filter(a => !tokenPrices[a.toLowerCase()]);
-  let dexPrices: Record<string, number> = {};
-  if (missingPriceAddrs.length > 0) {
-    dexPrices = await getDexScreenerPrices(wallet.chain, missingPriceAddrs);
-  }
-
   const enrichedTokens = tokens.map(t => {
-    const addr = t.address.toLowerCase();
     const priceUsd = t.address === 'native'
       ? nativePrice
-      : (tokenPrices[addr] || dexPrices[addr] || 0);
+      : (tokenPrices[t.address.toLowerCase()] || 0);
     return {
       ...t,
       priceUsd,

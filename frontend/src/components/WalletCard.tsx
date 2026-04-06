@@ -1,17 +1,50 @@
+import { useState } from 'react';
 import type { WalletPortfolio } from '../hooks/usePortfolio';
 import { chainBadge } from '../utils/chains';
 
 interface Props {
   portfolio: WalletPortfolio;
+  active: boolean;
+  onToggle: (id: number) => void;
 }
 
-export default function WalletCard({ portfolio }: Props) {
+export default function WalletCard({ portfolio, active, onToggle }: Props) {
   const { wallet, totalValueUsd, tokens } = portfolio;
   const badge = chainBadge(wallet.chain);
+  const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const visibleTokens = expanded ? tokens : tokens.slice(0, 5);
+  const hiddenCount = tokens.length - 5;
+
+  const copyAddress = () => {
+    navigator.clipboard.writeText(wallet.address);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-      <div className="mb-3 flex items-center justify-between">
+    <div className={`relative rounded-xl border bg-white p-5 shadow-sm transition-opacity ${active ? 'border-gray-200' : 'border-gray-200 opacity-50'}`}>
+      {/* Checkbox in top-right corner */}
+      <button
+        onClick={() => onToggle(wallet.id)}
+        title={active ? 'Exclude from totals' : 'Include in totals'}
+        className="absolute right-3.5 top-3.5 group"
+      >
+        <div className={`flex h-5 w-5 items-center justify-center rounded-md border-2 transition-all duration-200 ${
+          active
+            ? 'border-blue-500 bg-blue-500'
+            : 'border-gray-300 bg-white group-hover:border-gray-400'
+        }`}>
+          {active && (
+            <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          )}
+        </div>
+      </button>
+
+      <div className="mb-3 flex items-center justify-between pr-6">
         <div className="flex items-center gap-2">
           <span className={`rounded-lg border px-2 py-0.5 text-xs font-bold uppercase ${badge.classes}`}>
             {badge.label}
@@ -21,33 +54,40 @@ export default function WalletCard({ portfolio }: Props) {
           </span>
         </div>
         <span className="text-lg font-bold text-gray-900">
-          ${totalValueUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          ${totalValueUsd.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
         </span>
       </div>
-      <p className="mb-3 font-mono text-xs text-gray-400">{wallet.address}</p>
+      <p
+        className="mb-3 cursor-pointer font-mono text-xs text-gray-400 hover:text-gray-600 transition-colors"
+        onClick={copyAddress}
+        title="Click to copy"
+      >
+        {wallet.address}
+        <span className="ml-1.5 text-[10px]">{copied ? 'Copied!' : ''}</span>
+      </p>
       <div className="space-y-1.5">
-        {tokens.slice(0, 5).map(token => (
+        {visibleTokens.map(token => (
           <div key={token.address} className="flex items-center justify-between text-sm">
-            <div className="flex items-center gap-2">
-              {token.logoUri && (
-                <img src={token.logoUri} alt="" className="h-5 w-5 rounded-full" />
-              )}
-              <span className="font-medium text-gray-700">{token.symbol}</span>
-            </div>
+            <span className="font-medium text-gray-700">{token.symbol}</span>
             <div className="text-right">
               <span className="text-gray-500">
-                {token.balanceFormatted.toLocaleString(undefined, { maximumFractionDigits: 4 })}
+                {token.balanceFormatted.toLocaleString('ru-RU', { maximumFractionDigits: 4 })}
               </span>
               {token.valueUsd > 0 && (
                 <span className="ml-2 text-gray-400">
-                  ${token.valueUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                  ${token.valueUsd.toLocaleString('ru-RU', { maximumFractionDigits: 2 })}
                 </span>
               )}
             </div>
           </div>
         ))}
-        {tokens.length > 5 && (
-          <p className="text-xs text-gray-400">+{tokens.length - 5} more tokens</p>
+        {hiddenCount > 0 && (
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="text-xs text-blue-500 hover:text-blue-700 transition-colors"
+          >
+            {expanded ? 'Show less' : `+${hiddenCount} more tokens`}
+          </button>
         )}
       </div>
     </div>

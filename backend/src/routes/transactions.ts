@@ -1,8 +1,14 @@
 import { Router, Request, Response } from 'express';
 import db from '../db/client';
 import { getNativeTransactions, getTokenTransactions, getTronTransactions } from '../services/explorer';
-import { getNativePrice, getTokenPrices } from '../services/prices';
-import { getDexScreenerPrices } from '../services/dexscreener';
+import { getNativePrice } from '../services/prices';
+import {
+  isMoralisEnabled,
+  isMoralisChain,
+  getTokenTransfers,
+  getNativeTransfers,
+  getWalletTokens,
+} from '../services/moralis';
 
 const router = Router();
 
@@ -13,16 +19,16 @@ interface Wallet {
   label: string | null;
 }
 
+const NATIVE_SYMBOLS: Record<string, string> = {
+  ethereum: 'ETH',
+  bsc: 'BNB',
+  tron: 'TRX',
+  solana: 'SOL',
+};
+
 const NATIVE_COIN_IDS: Record<string, string> = {
   ethereum: 'ethereum',
   bsc: 'binancecoin',
-  tron: 'tron',
-  solana: 'solana',
-};
-
-const COINGECKO_PLATFORMS: Record<string, string> = {
-  ethereum: 'ethereum',
-  bsc: 'binance-smart-chain',
   tron: 'tron',
   solana: 'solana',
 };
@@ -32,7 +38,6 @@ router.get('/', async (_req: Request, res: Response) => {
   try {
     const wallets = db.prepare('SELECT * FROM wallets').all() as Wallet[];
 
-    // Sync transactions for all wallets
     for (const wallet of wallets) {
       await syncWalletTransactions(wallet);
     }
@@ -79,7 +84,116 @@ router.get('/:walletId', async (req: Request, res: Response) => {
   }
 });
 
+interface TxRecord {
+  hash: string;
+  blockNumber: number;
+  timestamp: string;
+  from: string;
+  to: string;
+  value: string;
+  tokenSymbol: string;
+  tokenAddress: string;
+  type: string;
+  valueUsd: number;
+}
+
 async function syncWalletTransactions(wallet: Wallet): Promise<void> {
+  if (isMoralisEnabled() && isMoralisChain(wallet.chain)) {
+    return syncMoralisTransactions(wallet);
+  }
+  return syncLegacyTransactions(wallet);
+}
+
+/**
+ * Build a price map from Moralis wallet tokens (current prices).
+ * Returns { tokenAddress -> usdPrice, 'native' -> nativePrice }
+ */
+async function getMoralisPrices(
+  chain: string,
+  address: string
+): Promise<Record<string, number>> {
+  const prices: Record<string, number> = {};
+
+  // Get token prices from Moralis portfolio (already cached)
+  const tokens = await getWalletTokens(chain, address);
+  for (const t of tokens) {
+    if (t.native_token) {
+      prices['native'] = t.usd_price || 0;
+    } else if (t.usd_price) {
+      prices[t.token_address.toLowerCase()] = t.usd_price;
+    }
+  }
+
+  // Fallback native price from CoinGecko if not in Moralis
+  if (!prices['native']) {
+    const coinId = NATIVE_COIN_IDS[chain];
+    if (coinId) {
+      prices['native'] = await getNativePrice(coinId);
+    }
+  }
+
+  return prices;
+}
+
+async function syncMoralisTransactions(wallet: Wallet): Promise<void> {
+  const [tokenTxs, nativeTxs, prices] = await Promise.all([
+    getTokenTransfers(wallet.chain, wallet.address),
+    getNativeTransfers(wallet.chain, wallet.address),
+    getMoralisPrices(wallet.chain, wallet.address),
+  ]);
+
+  const allTxs: TxRecord[] = [];
+  const nativeSymbol = NATIVE_SYMBOLS[wallet.chain] || '?';
+
+  // Token transfers
+  for (const tx of tokenTxs) {
+    const isReceive = tx.to_address.toLowerCase() === wallet.address.toLowerCase();
+    const valueDecimal = tx.value_decimal || '0';
+    const amount = parseFloat(valueDecimal) || 0;
+    const price = prices[tx.address.toLowerCase()] || 0;
+
+    allTxs.push({
+      hash: tx.transaction_hash,
+      blockNumber: parseInt(tx.block_number) || 0,
+      timestamp: tx.block_timestamp || '',
+      from: tx.from_address,
+      to: tx.to_address,
+      value: valueDecimal,
+      tokenSymbol: tx.token_symbol || '?',
+      tokenAddress: tx.address,
+      type: isReceive ? 'receive' : 'send',
+      valueUsd: amount * price,
+    });
+  }
+
+  // Native transfers
+  const nativePrice = prices['native'] || 0;
+  for (const tx of nativeTxs) {
+    if (tx.value === '0') continue;
+    const isReceive = tx.to_address.toLowerCase() === wallet.address.toLowerCase();
+    const valueFormatted = parseFloat(tx.value) / 1e18;
+
+    allTxs.push({
+      hash: tx.hash,
+      blockNumber: parseInt(tx.block_number) || 0,
+      timestamp: tx.block_timestamp || '',
+      from: tx.from_address,
+      to: tx.to_address,
+      value: valueFormatted.toString(),
+      tokenSymbol: nativeSymbol,
+      tokenAddress: 'native',
+      type: isReceive ? 'receive' : 'send',
+      valueUsd: valueFormatted * nativePrice,
+    });
+  }
+
+  if (allTxs.length === 0) return;
+
+  console.log(`[moralis:${wallet.chain}] Syncing ${allTxs.length} txs for ${wallet.address.slice(0, 8)}...`);
+  insertTransactions(wallet.id, allTxs);
+}
+
+async function syncLegacyTransactions(wallet: Wallet): Promise<void> {
   let allTxs: Array<{
     hash: string;
     blockNumber: number;
@@ -104,23 +218,28 @@ async function syncWalletTransactions(wallet: Wallet): Promise<void> {
 
   if (allTxs.length === 0) return;
 
-  // Get current prices for USD estimation
-  const prices = await getTxPrices(wallet.chain, allTxs);
+  const records: TxRecord[] = allTxs.map(tx => ({
+    ...tx,
+    valueUsd: 0,
+  }));
 
+  insertTransactions(wallet.id, records);
+}
+
+function insertTransactions(walletId: number, txs: TxRecord[]): void {
   const insert = db.prepare(`
-    INSERT OR IGNORE INTO transactions
+    INSERT INTO transactions
       (wallet_id, hash, block_number, timestamp, from_address, to_address, value, token_symbol, token_address, type, value_usd)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(wallet_id, hash, token_address) DO UPDATE SET
+      value_usd = excluded.value_usd
+    WHERE excluded.value_usd > 0 AND transactions.value_usd = 0
   `);
 
-  const batchInsert = db.transaction((txs: typeof allTxs) => {
-    for (const tx of txs) {
-      const amount = parseFloat(tx.value) || 0;
-      const price = prices[tx.tokenAddress.toLowerCase()] || 0;
-      const valueUsd = amount * price;
-
+  const batchInsert = db.transaction((records: TxRecord[]) => {
+    for (const tx of records) {
       insert.run(
-        wallet.id,
+        walletId,
         tx.hash,
         tx.blockNumber,
         tx.timestamp,
@@ -130,48 +249,12 @@ async function syncWalletTransactions(wallet: Wallet): Promise<void> {
         tx.tokenSymbol,
         tx.tokenAddress,
         tx.type,
-        valueUsd,
+        tx.valueUsd,
       );
     }
   });
 
-  batchInsert(allTxs);
-}
-
-async function getTxPrices(
-  chain: string,
-  txs: Array<{ tokenAddress: string }>
-): Promise<Record<string, number>> {
-  const prices: Record<string, number> = {};
-
-  // Native price
-  const nativeCoinId = NATIVE_COIN_IDS[chain];
-  if (nativeCoinId) {
-    const nativePrice = await getNativePrice(nativeCoinId);
-    prices['native'] = nativePrice;
-  }
-
-  // Token prices
-  const tokenAddrs = [...new Set(txs
-    .map(tx => tx.tokenAddress.toLowerCase())
-    .filter(a => a !== 'native'))];
-
-  if (tokenAddrs.length > 0) {
-    const platform = COINGECKO_PLATFORMS[chain];
-    if (platform) {
-      const cgPrices = await getTokenPrices(platform, tokenAddrs);
-      Object.assign(prices, cgPrices);
-    }
-
-    // DexScreener fallback for tokens not in CoinGecko
-    const missing = tokenAddrs.filter(a => !prices[a]);
-    if (missing.length > 0) {
-      const dexPrices = await getDexScreenerPrices(chain, missing);
-      Object.assign(prices, dexPrices);
-    }
-  }
-
-  return prices;
+  batchInsert(txs);
 }
 
 export default router;
