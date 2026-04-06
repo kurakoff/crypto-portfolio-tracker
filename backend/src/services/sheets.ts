@@ -18,7 +18,7 @@ function getAuth() {
     config.googleServiceAccountEmail,
     undefined,
     config.googlePrivateKey,
-    ['https://www.googleapis.com/auth/spreadsheets']
+    ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
   );
 }
 
@@ -40,17 +40,24 @@ export async function exportToSheets(): Promise<{
   } else if (config.googleSpreadsheetId) {
     spreadsheetId = config.googleSpreadsheetId;
   } else {
-    // Create new spreadsheet
-    const created = await sheets.spreadsheets.create({
-      requestBody: {
-        properties: { title: 'Crypto Portfolio — Transactions' },
-        sheets: [
-          { properties: { title: 'Transactions' } },
-          { properties: { title: 'Portfolio' } },
-        ],
-      },
-    });
-    spreadsheetId = created.data.spreadsheetId!;
+    throw new Error(
+      'No spreadsheet configured. Create a Google Sheet, share it with ' +
+      config.googleServiceAccountEmail +
+      ' as Editor, and set GOOGLE_SPREADSHEET_ID in .env'
+    );
+  }
+
+  // Verify we can access the spreadsheet
+  try {
+    await sheets.spreadsheets.get({ spreadsheetId });
+  } catch (err: any) {
+    if (err.response?.status === 403 || err.response?.status === 404) {
+      throw new Error(
+        'Cannot access spreadsheet. Make sure you shared it with ' +
+        config.googleServiceAccountEmail + ' as Editor'
+      );
+    }
+    throw err;
   }
 
   const spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}`;
@@ -100,9 +107,7 @@ export async function exportToSheets(): Promise<{
   // --- Portfolio sheet (full overwrite) ---
   const wallets = db.prepare('SELECT * FROM wallets').all() as any[];
   const portfolioHeader = ['Wallet', 'Chain', 'Label', 'Token', 'Balance'];
-  // We write a simple snapshot — balances are in the portfolio_snapshots or just wallet list
   const portfolioRows = [portfolioHeader];
-  // Add wallet rows (simplified — just list wallets)
   for (const w of wallets) {
     portfolioRows.push([w.address, w.chain, w.label || '', '', '']);
   }
@@ -132,6 +137,14 @@ export async function exportToSheets(): Promise<{
 // GET export status
 export function getExportStatus(): ExportRecord | null {
   return (db.prepare('SELECT * FROM exports ORDER BY id DESC LIMIT 1').get() as ExportRecord) || null;
+}
+
+// Check if sheet is configured
+export function getSheetConfig(): string | null {
+  const record = db.prepare('SELECT spreadsheet_id FROM exports ORDER BY id DESC LIMIT 1').get() as any;
+  if (record?.spreadsheet_id) return record.spreadsheet_id;
+  if (config.googleSpreadsheetId) return config.googleSpreadsheetId;
+  return null;
 }
 
 function txToRow(tx: any): string[] {

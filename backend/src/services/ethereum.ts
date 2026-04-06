@@ -2,8 +2,9 @@ import { ethers } from 'ethers';
 import { config } from '../config/rpc';
 import { cache } from '../cache/memory-cache';
 import { multicallBalances, multicallTokenMetadata } from './multicall';
-import { getTopEthereumTokens } from './token-list';
+import { getTopEthereumTokens, getTopBscTokens } from './token-list';
 import { getTokenBalances } from './explorer';
+import { discoverBscTokens } from './bsc-explorer';
 import type { TokenBalance, NFTItem } from '../routes/portfolio';
 
 const providers = new Map<string, ethers.JsonRpcProvider>();
@@ -41,7 +42,7 @@ const EVM_CHAINS: Record<string, EvmChainConfig> = {
     nativeName: 'BNB',
     coingeckoId: 'binancecoin',
     chainPrefix: 'bsc',
-    useTokenList: false,
+    useTokenList: true,
   },
 };
 
@@ -75,15 +76,26 @@ export async function getEvmPortfolio(chain: string, address: string): Promise<{
   // 2. Collect token addresses to check
   const tokenAddressSet = new Set<string>();
 
-  // 2a. From Uniswap token list (Ethereum only)
-  const tokenList = cfg.useTokenList ? await getTopEthereumTokens() : [];
+  // 2a. From token lists (Uniswap for ETH, PancakeSwap for BSC)
+  let tokenList: Awaited<ReturnType<typeof getTopEthereumTokens>> = [];
+  if (cfg.useTokenList) {
+    tokenList = chain === 'bsc' ? await getTopBscTokens() : await getTopEthereumTokens();
+  }
   for (const t of tokenList) {
     tokenAddressSet.add(t.address.toLowerCase());
   }
 
   // 2b. From explorer API — discover tokens the wallet has interacted with
-  const explorerTokens = await getTokenBalances(chain, address);
-  // Token discovery logging
+  let explorerTokens = await getTokenBalances(chain, address);
+
+  // 2c. BSC specific: discover token addresses via CoinGecko + getLogs
+  if (chain === 'bsc') {
+    const discoveredAddrs = await discoverBscTokens(address);
+    for (const a of discoveredAddrs) {
+      tokenAddressSet.add(a);
+    }
+  }
+
   if (explorerTokens.length > 0) {
     console.log(`[${chain}] Explorer found ${explorerTokens.length} tokens for ${address.slice(0,8)}`);
   }

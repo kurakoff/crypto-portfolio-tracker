@@ -18,26 +18,32 @@ export async function multicallBalances(
   const multicall = new ethers.Contract(MULTICALL3_ADDRESS, MULTICALL3_ABI, provider);
   const balanceOfData = erc20Interface.encodeFunctionData('balanceOf', [owner]);
 
-  const calls = tokenAddresses.map(addr => ({
-    target: addr,
-    allowFailure: true,
-    callData: balanceOfData,
-  }));
-
-  const results: MulticallResult[] = await multicall.aggregate3.staticCall(calls);
   const balances = new Map<string, bigint>();
+  const BATCH_SIZE = 500;
 
-  for (let i = 0; i < results.length; i++) {
-    if (results[i].success && results[i].returnData !== '0x') {
-      try {
-        const decoded = erc20Interface.decodeFunctionResult('balanceOf', results[i].returnData);
-        const balance = decoded[0] as bigint;
-        if (balance > 0n) {
-          balances.set(tokenAddresses[i], balance);
+  for (let start = 0; start < tokenAddresses.length; start += BATCH_SIZE) {
+    const batch = tokenAddresses.slice(start, start + BATCH_SIZE);
+    const calls = batch.map(addr => ({
+      target: addr,
+      allowFailure: true,
+      callData: balanceOfData,
+    }));
+
+    try {
+      const results: MulticallResult[] = await multicall.aggregate3.staticCall(calls);
+      for (let i = 0; i < results.length; i++) {
+        if (results[i].success && results[i].returnData !== '0x') {
+          try {
+            const decoded = erc20Interface.decodeFunctionResult('balanceOf', results[i].returnData);
+            const balance = decoded[0] as bigint;
+            if (balance > 0n) {
+              balances.set(batch[i], balance);
+            }
+          } catch {}
         }
-      } catch {
-        // skip malformed responses
       }
+    } catch (err) {
+      console.error(`Multicall batch failed (${start}-${start + batch.length}):`, (err as Error).message?.slice(0, 100));
     }
   }
 

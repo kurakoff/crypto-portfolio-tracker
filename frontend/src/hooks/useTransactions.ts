@@ -12,6 +12,7 @@ export interface Transaction {
   token_symbol: string;
   token_address: string;
   type: string;
+  value_usd: number;
   wallet_address: string;
   chain: string;
   wallet_label: string | null;

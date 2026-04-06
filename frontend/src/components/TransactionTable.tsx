@@ -24,6 +24,7 @@ export default function TransactionTable({ transactions }: Props) {
             <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500">Type</th>
             <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500">Token</th>
             <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">Amount</th>
+            <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">USD</th>
             <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500">To / From</th>
           </tr>
         </thead>
@@ -68,6 +69,13 @@ export default function TransactionTable({ transactions }: Props) {
                   <span className={isReceive ? 'text-green-600' : 'text-gray-700'}>
                     {isReceive ? '+' : '-'}{formatAmount(amount)}
                   </span>
+                </td>
+                <td className="px-4 py-3 text-right tabular-nums text-xs text-gray-500">
+                  {tx.value_usd && tx.value_usd > 0.01
+                    ? `$${tx.value_usd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                    : tx.value_usd && tx.value_usd > 0
+                      ? `<$0.01`
+                      : '—'}
                 </td>
                 <td className="px-4 py-3">
                   <span className="font-mono text-xs text-gray-400">

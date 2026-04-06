@@ -5,6 +5,7 @@ import { getEvmPortfolio, getEvmChainConfig } from '../services/ethereum';
 import { getSolanaPortfolio } from '../services/solana';
 import { getTronPortfolio } from '../services/tron';
 import { getTokenPrices, getNativePrice } from '../services/prices';
+import { getDexScreenerPrices } from '../services/dexscreener';
 
 const router = Router();
 
@@ -138,10 +139,18 @@ async function fetchWalletPortfolio(wallet: Wallet): Promise<WalletPortfolio> {
     ? await getTokenPrices(platform, tokenAddresses)
     : {};
 
+  // Find tokens without CoinGecko price — try DexScreener
+  const missingPriceAddrs = tokenAddresses.filter(a => !tokenPrices[a.toLowerCase()]);
+  let dexPrices: Record<string, number> = {};
+  if (missingPriceAddrs.length > 0) {
+    dexPrices = await getDexScreenerPrices(wallet.chain, missingPriceAddrs);
+  }
+
   const enrichedTokens = tokens.map(t => {
+    const addr = t.address.toLowerCase();
     const priceUsd = t.address === 'native'
       ? nativePrice
-      : (tokenPrices[t.address.toLowerCase()] || 0);
+      : (tokenPrices[addr] || dexPrices[addr] || 0);
     return {
       ...t,
       priceUsd,

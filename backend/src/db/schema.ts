@@ -23,6 +23,7 @@ export function initSchema(db: Database.Database): void {
       token_symbol TEXT,
       token_address TEXT,
       type TEXT DEFAULT 'transfer',
+      value_usd REAL DEFAULT 0,
       UNIQUE(wallet_id, hash, token_address)
     );
 
@@ -46,4 +47,11 @@ export function initSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_snapshots_wallet ON portfolio_snapshots(wallet_id);
     CREATE INDEX IF NOT EXISTS idx_snapshots_created ON portfolio_snapshots(created_at);
   `);
+
+  // Migration: add value_usd column if missing
+  try {
+    db.exec(`ALTER TABLE transactions ADD COLUMN value_usd REAL DEFAULT 0`);
+  } catch {
+    // Column already exists
+  }
 }

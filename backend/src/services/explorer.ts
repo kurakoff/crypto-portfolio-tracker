@@ -116,46 +116,10 @@ async function blockscoutTokenList(address: string): Promise<ExplorerTokenBalanc
   }
 }
 
-// ---- BSC via BscScan (V1 still works for BSC) ----
-
-async function bscscanTransactions(address: string, action: 'txlist' | 'tokentx'): Promise<ExplorerTx[]> {
-  const cacheKey = `bscscan:${action}:${address}`;
-  const cached = cache.get<ExplorerTx[]>(cacheKey);
-  if (cached) return cached;
-
-  try {
-    const resp = await fetch(
-      `https://api.bscscan.com/api?module=account&action=${action}&address=${address}&startblock=0&endblock=99999999&page=1&offset=100&sort=desc`
-    );
-    const data = (await resp.json()) as { status: string; result: any[] };
-
-    if (data.status !== '1' || !Array.isArray(data.result)) {
-      cache.set(cacheKey, [], 30_000);
-      return [];
-    }
-
-    const isTokenTx = action === 'tokentx';
-    const txs: ExplorerTx[] = data.result.map((tx: any) => ({
-      hash: tx.hash,
-      blockNumber: parseInt(tx.blockNumber),
-      timestamp: new Date(parseInt(tx.timeStamp) * 1000).toISOString(),
-      from: tx.from,
-      to: tx.to || '',
-      value: isTokenTx
-        ? formatTokenValue(tx.value, parseInt(tx.tokenDecimal || '18'))
-        : formatWei(tx.value),
-      tokenSymbol: isTokenTx ? (tx.tokenSymbol || 'UNKNOWN') : 'BNB',
-      tokenAddress: isTokenTx ? tx.contractAddress : 'native',
-      type: tx.from.toLowerCase() === address.toLowerCase() ? 'send' : 'receive',
-    }));
-
-    cache.set(cacheKey, txs, 60_000);
-    return txs;
-  } catch (err) {
-    console.error(`BscScan ${action} failed:`, err);
-    return [];
-  }
-}
+// ---- BSC via Etherscan V2 API (requires free API key) ----
+// BscScan V1 is deprecated. BSC transactions require Etherscan V2 API key.
+// For now, BSC token discovery uses PancakeSwap token list + Multicall.
+// BSC transactions are not available without an API key.
 
 // ---- Tron via TronGrid ----
 
@@ -221,14 +185,18 @@ export async function getTronTransactions(address: string): Promise<ExplorerTx[]
 
 export async function getNativeTransactions(chain: string, address: string): Promise<ExplorerTx[]> {
   if (chain === 'ethereum') return blockscoutNativeTransfers(address);
-  if (chain === 'bsc') return bscscanTransactions(address, 'txlist');
   if (chain === 'tron') return getTronTransactions(address);
+  // BSC native TXs: not available via free API
   return [];
 }
 
 export async function getTokenTransactions(chain: string, address: string): Promise<ExplorerTx[]> {
   if (chain === 'ethereum') return blockscoutTokenTransfers(address);
-  if (chain === 'bsc') return bscscanTransactions(address, 'tokentx');
+  if (chain === 'bsc') {
+    // BSC token transfers via getLogs (drpc.org)
+    const { getBscTransactions } = await import('./bsc-explorer');
+    return getBscTransactions(address);
+  }
   return [];
 }
 
@@ -237,18 +205,7 @@ export async function getTokenBalances(
   address: string
 ): Promise<ExplorerTokenBalance[]> {
   if (chain === 'ethereum') return blockscoutTokenList(address);
-  if (chain === 'bsc') {
-    const txs = await bscscanTransactions(address, 'tokentx');
-    const seen = new Map<string, { symbol: string; name: string }>();
-    for (const tx of txs) {
-      if (!seen.has(tx.tokenAddress.toLowerCase())) {
-        seen.set(tx.tokenAddress.toLowerCase(), { symbol: tx.tokenSymbol, name: tx.tokenSymbol });
-      }
-    }
-    return Array.from(seen.entries()).map(([addr, info]) => ({
-      contractAddress: addr, symbol: info.symbol, name: info.name, decimals: 18, rawBalance: '0',
-    }));
-  }
+  // BSC: token discovery via PancakeSwap token list + Multicall (handled in ethereum.ts)
   return [];
 }
 
