@@ -3,7 +3,8 @@ import path from 'path';
 import fs from 'fs';
 import { initSchema } from './schema';
 
-const DATA_DIR = path.resolve(__dirname, '../../data');
+// Use DB_PATH env var for persistent storage in Docker, fallback to local data/
+const DATA_DIR = process.env.DB_PATH || path.resolve(__dirname, '../../data');
 
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });

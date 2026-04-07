@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Transaction } from '../hooks/useTransactions';
 import { chainBadge } from '../utils/chains';
+import { copyToClipboard } from '../utils/clipboard';
 
 interface Props {
   transactions: Transaction[];
@@ -157,7 +158,7 @@ export default function TransactionTable({ transactions }: Props) {
                         <span
                           className="cursor-pointer font-mono text-xs text-gray-400 hover:text-gray-600 transition-colors"
                           onClick={() => {
-                            navigator.clipboard.writeText(addr);
+                            copyToClipboard(addr);
                             setCopiedAddr(key);
                             setTimeout(() => setCopiedAddr(null), 3000);
                           }}

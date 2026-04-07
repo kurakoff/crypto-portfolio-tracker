@@ -1,5 +1,6 @@
 import { useExport, useExportStatus, useConfigureSheet, useDisconnectSheet } from '../hooks/useExport';
 import { useState, useRef, useEffect } from 'react';
+import { copyToClipboard } from '../utils/clipboard';
 
 interface ExportData {
   tokens: Array<{ symbol: string; name: string; balance: string; priceUsd: number; valueUsd: number }>;
@@ -183,7 +184,7 @@ export default function ExportButton({ exportData }: Props) {
                   {status?.serviceAccountEmail || 'loading...'}
                 </code>
                 <button
-                  onClick={() => navigator.clipboard.writeText(status?.serviceAccountEmail || '')}
+                  onClick={() => copyToClipboard(status?.serviceAccountEmail || '')}
                   className="shrink-0 rounded bg-gray-200 px-2 py-1 text-xs text-gray-600 hover:bg-gray-300"
                 >
                   Copy

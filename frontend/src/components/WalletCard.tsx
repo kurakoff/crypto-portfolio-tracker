@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { WalletPortfolio } from '../hooks/usePortfolio';
 import { chainBadge } from '../utils/chains';
+import { copyToClipboard } from '../utils/clipboard';
 
 interface Props {
   portfolio: WalletPortfolio;
@@ -18,7 +19,7 @@ export default function WalletCard({ portfolio, active, onToggle }: Props) {
   const hiddenCount = tokens.length - 5;
 
   const copyAddress = () => {
-    navigator.clipboard.writeText(wallet.address);
+    copyToClipboard(wallet.address);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
