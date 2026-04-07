@@ -1,6 +1,6 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery } from "@tanstack/react-query";
 
-const API_BASE = import.meta.env.VITE_API_URL || '';
+const API_BASE = import.meta.env.VITE_API_URL || "";
 
 export interface TokenBalance {
   address: string;
@@ -37,13 +37,13 @@ export interface WalletPortfolio {
 
 async function fetchPortfolio(): Promise<WalletPortfolio[]> {
   const res = await fetch(`${API_BASE}/api/portfolio`);
-  if (!res.ok) throw new Error('Failed to fetch portfolio');
+  if (!res.ok) throw new Error("Failed to fetch portfolio");
   return res.json();
 }
 
 export function usePortfolio() {
   return useQuery({
-    queryKey: ['portfolio'],
+    queryKey: ["portfolio"],
     queryFn: fetchPortfolio,
     refetchInterval: 120_000,
   });

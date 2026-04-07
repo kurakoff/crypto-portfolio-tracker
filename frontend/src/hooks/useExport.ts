@@ -1,97 +1,98 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-interface ExportResult {
-  spreadsheetUrl: string;
-  newRows: number;
-  totalRows: number;
+const API_BASE = import.meta.env.VITE_API_URL || "";
+
+export interface ExportStatus {
+  connected: boolean;
+  spreadsheetId?: string | null;
+  spreadsheetUrl?: string | null;
+  lastSyncAt?: string | null;
 }
 
-interface ExportStatus {
-  id?: number;
-  spreadsheet_id?: string;
-  spreadsheet_url?: string;
-  last_export_at?: string;
-  rows_exported?: number;
-  configured: boolean;
-  serviceAccountEmail: string;
-}
-
-interface ExportData {
-  tokens?: Array<{ symbol: string; name: string; balance: string; priceUsd: number; valueUsd: number }>;
-  transactions?: Array<{
-    timestamp: string; wallet_label?: string; wallet_address: string; chain: string;
-    type: string; token_symbol: string; value: string; value_usd: number;
-    from_address: string; to_address: string; hash: string;
-  }>;
-}
-
-async function exportToSheets(data?: ExportData): Promise<ExportResult> {
-  const res = await fetch('/api/export/sheets', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data || {}),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.details || err.error || 'Failed to export');
-  }
-  return res.json();
-}
-
-async function configureSheet(spreadsheetUrl: string): Promise<void> {
-  const res = await fetch('/api/export/configure', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ spreadsheetUrl }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || 'Failed to configure');
-  }
+export interface ConfigureExportInput {
+  spreadsheetId: string;
 }
 
 async function fetchExportStatus(): Promise<ExportStatus> {
-  const res = await fetch('/api/export/status');
-  if (!res.ok) return { configured: false, serviceAccountEmail: '' };
+  const res = await fetch(`${API_BASE}/api/export/status`);
+  if (!res.ok) throw new Error("Failed to fetch export status");
   return res.json();
 }
 
-export function useExport() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (data?: ExportData) => exportToSheets(data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['exportStatus'] });
-    },
+async function connectSheets(): Promise<{ url?: string; authUrl?: string }> {
+  const res = await fetch(`${API_BASE}/api/export/sheets`, {
+    method: "POST",
   });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to connect Google Sheets");
+  }
+
+  return res.json();
 }
 
-export function useConfigureSheet() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: configureSheet,
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['exportStatus'] });
+async function configureExport(
+  input: ConfigureExportInput
+): Promise<ExportStatus> {
+  const res = await fetch(`${API_BASE}/api/export/configure`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
     },
+    body: JSON.stringify(input),
   });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to configure export");
+  }
+
+  return res.json();
 }
 
-export function useDisconnectSheet() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async () => {
-      const res = await fetch('/api/export/disconnect', { method: 'DELETE' });
-      if (!res.ok) throw new Error('Failed to disconnect');
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['exportStatus'] });
-    },
+async function disconnectExport(): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/export/disconnect`, {
+    method: "DELETE",
   });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to disconnect export");
+  }
 }
 
 export function useExportStatus() {
   return useQuery({
-    queryKey: ['exportStatus'],
+    queryKey: ["export-status"],
     queryFn: fetchExportStatus,
+  });
+}
+
+export function useConnectSheets() {
+  return useMutation({
+    mutationFn: connectSheets,
+  });
+}
+
+export function useConfigureExport() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: configureExport,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["export-status"] });
+    },
+  });
+}
+
+export function useDisconnectExport() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: disconnectExport,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["export-status"] });
+    },
   });
 }

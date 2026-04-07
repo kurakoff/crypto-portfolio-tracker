@@ -1,59 +1,84 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+
+const API_BASE = import.meta.env.VITE_API_URL || "";
 
 export interface Wallet {
   id: number;
   address: string;
-  chain: 'ethereum' | 'bsc' | 'tron' | 'solana';
+  chain: string;
   label: string | null;
-  created_at: string;
+  created_at?: string;
+}
+
+export interface CreateWalletInput {
+  address: string;
+  chain: string;
+  label?: string;
 }
 
 async function fetchWallets(): Promise<Wallet[]> {
-  const res = await fetch('/api/wallets');
-  if (!res.ok) throw new Error('Failed to fetch wallets');
+  const res = await fetch(`${API_BASE}/api/wallets`);
+  if (!res.ok) throw new Error("Failed to fetch wallets");
   return res.json();
 }
 
-async function addWallet(data: { address: string; chain: string; label?: string }): Promise<Wallet> {
-  const res = await fetch('/api/wallets', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
+async function createWallet(input: CreateWalletInput): Promise<Wallet> {
+  const res = await fetch(`${API_BASE}/api/wallets`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
   });
+
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error || 'Failed to add wallet');
+    const text = await res.text();
+    throw new Error(text || "Failed to create wallet");
   }
+
   return res.json();
 }
 
 async function deleteWallet(id: number): Promise<void> {
-  const res = await fetch(`/api/wallets/${id}`, { method: 'DELETE' });
-  if (!res.ok) throw new Error('Failed to delete wallet');
+  const res = await fetch(`${API_BASE}/api/wallets/${id}`, {
+    method: "DELETE",
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Failed to delete wallet");
+  }
 }
 
 export function useWallets() {
-  return useQuery({ queryKey: ['wallets'], queryFn: fetchWallets });
+  return useQuery({
+    queryKey: ["wallets"],
+    queryFn: fetchWallets,
+  });
 }
 
-export function useAddWallet() {
-  const qc = useQueryClient();
+export function useCreateWallet() {
+  const queryClient = useQueryClient();
+
   return useMutation({
-    mutationFn: addWallet,
+    mutationFn: createWallet,
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['wallets'] });
-      qc.invalidateQueries({ queryKey: ['portfolio'] });
+      queryClient.invalidateQueries({ queryKey: ["wallets"] });
+      queryClient.invalidateQueries({ queryKey: ["portfolio"] });
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
     },
   });
 }
 
 export function useDeleteWallet() {
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
+
   return useMutation({
     mutationFn: deleteWallet,
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['wallets'] });
-      qc.invalidateQueries({ queryKey: ['portfolio'] });
+      queryClient.invalidateQueries({ queryKey: ["wallets"] });
+      queryClient.invalidateQueries({ queryKey: ["portfolio"] });
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
     },
   });
 }
