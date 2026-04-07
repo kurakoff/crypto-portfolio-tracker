@@ -172,7 +172,7 @@ export async function exportToSheets(input?: ExportInput): Promise<{
       ORDER BY t.timestamp DESC
     `).all() as any[];
     txRows = allTxs.map(tx => [
-      tx.timestamp || '',
+      tx.timestamp ? new Date(tx.timestamp).toLocaleString('ru-RU') : '',
       `${tx.wallet_label || ''} (${tx.wallet_address?.slice(0, 8)}...)`,
       tx.chain || '',
       tx.type || '',
