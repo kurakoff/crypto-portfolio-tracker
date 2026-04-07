@@ -1,4 +1,6 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery } from "@tanstack/react-query";
+
+const API_BASE = import.meta.env.VITE_API_URL || "";
 
 export interface Transaction {
   id: number;
@@ -19,14 +21,14 @@ export interface Transaction {
 }
 
 async function fetchTransactions(): Promise<Transaction[]> {
-  const res = await fetch('/api/transactions');
-  if (!res.ok) throw new Error('Failed to fetch transactions');
+  const res = await fetch(`${API_BASE}/api/transactions`);
+  if (!res.ok) throw new Error("Failed to fetch transactions");
   return res.json();
 }
 
 export function useTransactions() {
   return useQuery({
-    queryKey: ['transactions'],
+    queryKey: ["transactions"],
     queryFn: fetchTransactions,
     refetchInterval: 120_000,
   });
