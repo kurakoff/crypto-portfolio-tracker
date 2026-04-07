@@ -23,12 +23,30 @@ function getAuth() {
   if (!config.googleServiceAccountEmail || !config.googlePrivateKey) {
     throw new Error('Google Sheets credentials not configured. Set GOOGLE_SERVICE_ACCOUNT_EMAIL and GOOGLE_PRIVATE_KEY in .env');
   }
-  return new google.auth.JWT(
-    config.googleServiceAccountEmail,
-    undefined,
-    config.googlePrivateKey,
-    ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
-  );
+
+  const key = config.googlePrivateKey;
+
+  // Validate PEM structure
+  if (!key.includes('-----BEGIN')) {
+    throw new Error('GOOGLE_PRIVATE_KEY is invalid — must be a PEM key starting with -----BEGIN PRIVATE KEY-----. If using Coolify/Docker, try base64-encoding the key.');
+  }
+
+  try {
+    return new google.auth.JWT(
+      config.googleServiceAccountEmail,
+      undefined,
+      key,
+      ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+    );
+  } catch (err: any) {
+    if (err.message?.includes('DECODER') || err.message?.includes('unsupported')) {
+      throw new Error(
+        'Private key format error (OpenSSL 3.x). Try base64-encoding GOOGLE_PRIVATE_KEY: ' +
+        'base64 -w0 your-key.pem, then set that as the env var.'
+      );
+    }
+    throw err;
+  }
 }
 
 export async function exportToSheets(input?: ExportInput): Promise<{

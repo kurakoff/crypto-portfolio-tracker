@@ -71,11 +71,11 @@ export default function WalletCard({ portfolio, active, onToggle }: Props) {
             <span className="font-medium text-gray-700">{token.symbol}</span>
             <div className="text-right">
               <span className="text-gray-500">
-                {token.balanceFormatted.toLocaleString('ru-RU', { maximumFractionDigits: 4 })}
+                {formatBalance(token.balanceFormatted)}
               </span>
               {token.valueUsd > 0 && (
                 <span className="ml-2 text-gray-400">
-                  ${token.valueUsd.toLocaleString('ru-RU', { maximumFractionDigits: 2 })}
+                  {token.valueUsd < 0.01 ? '<$0.01' : `$${token.valueUsd.toLocaleString('ru-RU', { maximumFractionDigits: 2 })}`}
                 </span>
               )}
             </div>
@@ -96,4 +96,11 @@ export default function WalletCard({ portfolio, active, onToggle }: Props) {
 
 function shortenAddress(addr: string): string {
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+}
+
+function formatBalance(n: number): string {
+  if (n === 0) return '0';
+  if (n < 0.0001) return '<0.0001';
+  if (n < 1) return n.toFixed(6);
+  return n.toLocaleString('ru-RU', { maximumFractionDigits: 4 });
 }
