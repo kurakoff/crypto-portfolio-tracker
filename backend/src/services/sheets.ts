@@ -1,5 +1,5 @@
 import { google } from 'googleapis';
-import crypto from 'crypto';
+import { webcrypto } from 'crypto';
 import { config } from '../config/rpc';
 import db from '../db/client';
 
@@ -20,42 +20,97 @@ interface ExportInput {
   }>;
 }
 
-function getAuth() {
+// ---- WebCrypto JWT signing (bypasses OpenSSL DECODER issue) ----
+
+function pemToDer(pem: string): ArrayBuffer {
+  const b64 = pem
+    .replace(/-----BEGIN .*-----/, '')
+    .replace(/-----END .*-----/, '')
+    .replace(/[\s\n\r]/g, '');
+  const binary = Buffer.from(b64, 'base64');
+  return binary.buffer.slice(binary.byteOffset, binary.byteOffset + binary.byteLength);
+}
+
+function toBase64Url(buf: ArrayBuffer): string {
+  return Buffer.from(buf).toString('base64url');
+}
+
+async function signJwtWebCrypto(email: string, pem: string, scopes: string[]): Promise<string> {
+  const subtle = webcrypto.subtle;
+  const der = pemToDer(pem);
+
+  const privateKey = await subtle.importKey(
+    'pkcs8',
+    der,
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+
+  const now = Math.floor(Date.now() / 1000);
+  const header = { alg: 'RS256', typ: 'JWT' };
+  const payload = {
+    iss: email,
+    scope: scopes.join(' '),
+    aud: 'https://oauth2.googleapis.com/token',
+    iat: now,
+    exp: now + 3600,
+  };
+
+  const headerB64 = Buffer.from(JSON.stringify(header)).toString('base64url');
+  const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const input = `${headerB64}.${payloadB64}`;
+
+  const signature = await subtle.sign(
+    'RSASSA-PKCS1-v1_5',
+    privateKey,
+    new TextEncoder().encode(input)
+  );
+
+  return `${input}.${toBase64Url(signature)}`;
+}
+
+async function getAccessToken(): Promise<string> {
+  const scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive'];
+  const jwt = await signJwtWebCrypto(config.googleServiceAccountEmail, config.googlePrivateKey, scopes);
+
+  const resp = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`,
+  });
+
+  if (!resp.ok) {
+    const err = await resp.text();
+    throw new Error(`Google OAuth failed: ${err}`);
+  }
+
+  const data = (await resp.json()) as { access_token: string };
+  return data.access_token;
+}
+
+async function getSheetsClient() {
   if (!config.googleServiceAccountEmail || !config.googlePrivateKey) {
     throw new Error('Google Sheets credentials not configured. Set GOOGLE_SERVICE_ACCOUNT_EMAIL and GOOGLE_PRIVATE_KEY in .env');
   }
-
-  let key = config.googlePrivateKey;
-
-  // Validate PEM structure
-  if (!key.includes('-----BEGIN')) {
-    throw new Error('GOOGLE_PRIVATE_KEY is invalid — must be a PEM key starting with -----BEGIN PRIVATE KEY-----');
+  if (!config.googlePrivateKey.includes('-----BEGIN')) {
+    throw new Error('GOOGLE_PRIVATE_KEY is invalid — must be a PEM key');
   }
 
-  // Re-export key through Node crypto to ensure OpenSSL 3.x compatibility
-  try {
-    const keyObj = crypto.createPrivateKey({ key, format: 'pem' });
-    key = keyObj.export({ type: 'pkcs8', format: 'pem' }) as string;
-  } catch (err: any) {
-    console.error('[sheets] Key re-export failed, using raw PEM:', err.message);
-    // Fall through with original key — will work if NODE_OPTIONS=--openssl-legacy-provider is set
-  }
-
-  return new google.auth.JWT(
-    config.googleServiceAccountEmail,
-    undefined,
-    key,
-    ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
-  );
+  const token = await getAccessToken();
+  const auth = new google.auth.OAuth2();
+  auth.setCredentials({ access_token: token });
+  return google.sheets({ version: 'v4', auth });
 }
+
+// ---- Export logic ----
 
 export async function exportToSheets(input?: ExportInput): Promise<{
   spreadsheetUrl: string;
   newRows: number;
   totalRows: number;
 }> {
-  const auth = getAuth();
-  const sheets = google.sheets({ version: 'v4', auth });
+  const sheets = await getSheetsClient();
 
   let exportRecord = db.prepare('SELECT * FROM exports ORDER BY id DESC LIMIT 1').get() as ExportRecord | undefined;
 
@@ -89,7 +144,6 @@ export async function exportToSheets(input?: ExportInput): Promise<{
   const spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}`;
 
   // --- Transactions sheet ---
-  // Use filtered data from frontend if provided, otherwise fall back to DB
   let txRows: string[][] = [];
   if (input?.transactions && input.transactions.length > 0) {
     txRows = input.transactions.map(tx => [
