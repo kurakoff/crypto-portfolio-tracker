@@ -1,4 +1,5 @@
 import { google } from 'googleapis';
+import crypto from 'crypto';
 import { config } from '../config/rpc';
 import db from '../db/client';
 
@@ -24,29 +25,28 @@ function getAuth() {
     throw new Error('Google Sheets credentials not configured. Set GOOGLE_SERVICE_ACCOUNT_EMAIL and GOOGLE_PRIVATE_KEY in .env');
   }
 
-  const key = config.googlePrivateKey;
+  let key = config.googlePrivateKey;
 
   // Validate PEM structure
   if (!key.includes('-----BEGIN')) {
-    throw new Error('GOOGLE_PRIVATE_KEY is invalid — must be a PEM key starting with -----BEGIN PRIVATE KEY-----. If using Coolify/Docker, try base64-encoding the key.');
+    throw new Error('GOOGLE_PRIVATE_KEY is invalid — must be a PEM key starting with -----BEGIN PRIVATE KEY-----');
   }
 
+  // Re-export key through Node crypto to ensure OpenSSL 3.x compatibility
   try {
-    return new google.auth.JWT(
-      config.googleServiceAccountEmail,
-      undefined,
-      key,
-      ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
-    );
+    const keyObj = crypto.createPrivateKey({ key, format: 'pem' });
+    key = keyObj.export({ type: 'pkcs8', format: 'pem' }) as string;
   } catch (err: any) {
-    if (err.message?.includes('DECODER') || err.message?.includes('unsupported')) {
-      throw new Error(
-        'Private key format error (OpenSSL 3.x). Try base64-encoding GOOGLE_PRIVATE_KEY: ' +
-        'base64 -w0 your-key.pem, then set that as the env var.'
-      );
-    }
-    throw err;
+    console.error('[sheets] Key re-export failed, using raw PEM:', err.message);
+    // Fall through with original key — will work if NODE_OPTIONS=--openssl-legacy-provider is set
   }
+
+  return new google.auth.JWT(
+    config.googleServiceAccountEmail,
+    undefined,
+    key,
+    ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+  );
 }
 
 export async function exportToSheets(input?: ExportInput): Promise<{
