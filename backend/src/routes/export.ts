@@ -51,8 +51,8 @@ router.delete('/disconnect', (_req: Request, res: Response) => {
 // POST /api/export/sheets — run export with optional filtered data from frontend
 router.post('/sheets', async (req: Request, res: Response) => {
   try {
-    const { tokens, transactions } = req.body || {};
-    const result = await exportToSheets({ tokens, transactions });
+    const { tokens, transactions, totalValue, totalReceived, totalSent, dateFrom, dateTo } = req.body || {};
+    const result = await exportToSheets({ tokens, transactions, totalValue, totalReceived, totalSent, dateFrom, dateTo });
     res.json(result);
   } catch (err: any) {
     console.error('Export error:', err);

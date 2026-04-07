@@ -24,6 +24,7 @@ interface ExportData {
   totalSent?: number;
   dateFrom?: string;
   dateTo?: string;
+  exportedAt?: string;
   tokens?: Array<{
     symbol: string;
     name: string;

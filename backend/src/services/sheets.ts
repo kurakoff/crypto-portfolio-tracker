@@ -17,6 +17,7 @@ interface ExportInput {
   totalSent?: number;
   dateFrom?: string;
   dateTo?: string;
+  exportedAt?: string;
   tokens?: Array<{ symbol: string; name: string; balance: string; priceUsd: number; valueUsd: number }>;
   transactions?: Array<{
     timestamp: string; wallet_label?: string; wallet_address: string; chain: string;
@@ -186,23 +187,24 @@ export async function exportToSheets(input?: ExportInput): Promise<{
 
   const txHeader = ['Date', 'Wallet', 'Chain', 'Type', 'Token', 'Amount', 'USD', 'From', 'To', 'Hash'];
 
+  // Totals row for transactions
+  const txTotalReceived = input?.totalReceived ?? 0;
+  const txTotalSent = input?.totalSent ?? 0;
+  const txTotalsRow = ['', '', '', '', '', '', '', '', '', ''];
+  const txReceivedRow = ['', '', '', 'Total Received', '', '', `$${txTotalReceived.toFixed(2)}`, '', '', ''];
+  const txSentRow = ['', '', '', 'Total Sent', '', '', `$${txTotalSent.toFixed(2)}`, '', '', ''];
+
   await ensureSheet(sheets, spreadsheetId, 'Transactions');
   await sheets.spreadsheets.values.clear({ spreadsheetId, range: 'Transactions!A:J' });
-  if (txRows.length > 0) {
-    await sheets.spreadsheets.values.update({
-      spreadsheetId,
-      range: 'Transactions!A1',
-      valueInputOption: 'USER_ENTERED',
-      requestBody: { values: [txHeader, ...txRows] },
-    });
-  } else {
-    await sheets.spreadsheets.values.update({
-      spreadsheetId,
-      range: 'Transactions!A1',
-      valueInputOption: 'USER_ENTERED',
-      requestBody: { values: [txHeader] },
-    });
-  }
+  const txValues = txRows.length > 0
+    ? [txHeader, ...txRows, txTotalsRow, txReceivedRow, txSentRow]
+    : [txHeader];
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range: 'Transactions!A1',
+    valueInputOption: 'USER_ENTERED',
+    requestBody: { values: txValues },
+  });
 
   // --- Portfolio sheet ---
   let portfolioRows: string[][] = [];
@@ -216,6 +218,11 @@ export async function exportToSheets(input?: ExportInput): Promise<{
     ]);
   }
 
+  // Totals row for portfolio
+  const portfolioTotal = input?.totalValue ?? 0;
+  const portfolioTotalsRow = ['', '', '', '', ''];
+  const portfolioSumRow = ['', '', '', 'Total', `$${portfolioTotal.toFixed(2)}`];
+
   const portfolioHeader = ['Token', 'Name', 'Balance', 'Price', 'Value'];
   await ensureSheet(sheets, spreadsheetId, 'Portfolio');
   await sheets.spreadsheets.values.clear({ spreadsheetId, range: 'Portfolio!A:E' });
@@ -223,7 +230,7 @@ export async function exportToSheets(input?: ExportInput): Promise<{
     spreadsheetId,
     range: 'Portfolio!A1',
     valueInputOption: 'USER_ENTERED',
-    requestBody: { values: [portfolioHeader, ...portfolioRows] },
+    requestBody: { values: [portfolioHeader, ...portfolioRows, portfolioTotalsRow, portfolioSumRow] },
   });
 
   // --- Summary sheet ---
@@ -234,7 +241,7 @@ export async function exportToSheets(input?: ExportInput): Promise<{
     ['Total Sent', input?.totalSent ? `$${input.totalSent.toFixed(2)}` : '$0'],
     ['Tokens Count', String(portfolioRows.length)],
     ['Transactions Count', String(txRows.length)],
-    ['Exported At', new Date().toLocaleString('ru-RU')],
+    ['Exported At', input?.exportedAt || new Date().toLocaleString('ru-RU')],
   ];
   await ensureSheet(sheets, spreadsheetId, 'Summary');
   await sheets.spreadsheets.values.clear({ spreadsheetId, range: 'Summary!A:B' });

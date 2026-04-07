@@ -8,6 +8,7 @@ interface ExportData {
   totalSent?: number;
   dateFrom?: string;
   dateTo?: string;
+  exportedAt?: string;
   tokens: Array<{ symbol: string; name: string; balance: string; priceUsd: number; valueUsd: number }>;
   transactions: Array<{
     timestamp: string; wallet_label?: string; wallet_address: string; chain: string;

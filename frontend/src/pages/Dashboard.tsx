@@ -79,6 +79,7 @@ export default function Dashboard() {
     totalSent,
     dateFrom: dateRange.from.toLocaleDateString('ru-RU'),
     dateTo: dateRange.to.toLocaleDateString('ru-RU'),
+    exportedAt: new Date().toLocaleString('ru-RU'),
     tokens: aggregatedTokens.map(t => ({
       symbol: t.symbol,
       name: t.name,
@@ -87,7 +88,7 @@ export default function Dashboard() {
       valueUsd: t.valueUsd,
     })),
     transactions: filteredTxs.map(tx => ({
-      timestamp: tx.timestamp,
+      timestamp: tx.timestamp ? new Date(tx.timestamp).toLocaleString('ru-RU') : '',
       wallet_label: tx.wallet_label || undefined,
       wallet_address: tx.wallet_address,
       chain: tx.chain,
