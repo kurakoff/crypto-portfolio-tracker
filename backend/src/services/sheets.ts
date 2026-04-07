@@ -12,6 +12,11 @@ interface ExportRecord {
 }
 
 interface ExportInput {
+  totalValue?: number;
+  totalReceived?: number;
+  totalSent?: number;
+  dateFrom?: string;
+  dateTo?: string;
   tokens?: Array<{ symbol: string; name: string; balance: string; priceUsd: number; valueUsd: number }>;
   transactions?: Array<{
     timestamp: string; wallet_label?: string; wallet_address: string; chain: string;
@@ -219,6 +224,25 @@ export async function exportToSheets(input?: ExportInput): Promise<{
     range: 'Portfolio!A1',
     valueInputOption: 'USER_ENTERED',
     requestBody: { values: [portfolioHeader, ...portfolioRows] },
+  });
+
+  // --- Summary sheet ---
+  const summaryRows: string[][] = [
+    ['Period', input?.dateFrom && input?.dateTo ? `${input.dateFrom} — ${input.dateTo}` : 'All time'],
+    ['Portfolio Value', input?.totalValue ? `$${input.totalValue.toFixed(2)}` : ''],
+    ['Total Received', input?.totalReceived ? `$${input.totalReceived.toFixed(2)}` : '$0'],
+    ['Total Sent', input?.totalSent ? `$${input.totalSent.toFixed(2)}` : '$0'],
+    ['Tokens Count', String(portfolioRows.length)],
+    ['Transactions Count', String(txRows.length)],
+    ['Exported At', new Date().toLocaleString('ru-RU')],
+  ];
+  await ensureSheet(sheets, spreadsheetId, 'Summary');
+  await sheets.spreadsheets.values.clear({ spreadsheetId, range: 'Summary!A:B' });
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range: 'Summary!A1',
+    valueInputOption: 'USER_ENTERED',
+    requestBody: { values: summaryRows },
   });
 
   // Update export record

@@ -64,8 +64,21 @@ export default function Dashboard() {
     });
   }, [transactions, dateRange, activeWalletIds]);
 
+  // Transaction totals
+  const totalReceived = useMemo(() =>
+    filteredTxs.filter(tx => tx.type === 'receive').reduce((sum, tx) => sum + (tx.value_usd || 0), 0),
+    [filteredTxs]);
+  const totalSent = useMemo(() =>
+    filteredTxs.filter(tx => tx.type === 'send').reduce((sum, tx) => sum + (tx.value_usd || 0), 0),
+    [filteredTxs]);
+
   // Prepare export data
   const exportData = useMemo(() => ({
+    totalValue: activePortfolios.reduce((sum, p) => sum + p.totalValueUsd, 0),
+    totalReceived,
+    totalSent,
+    dateFrom: dateRange.from.toLocaleDateString('ru-RU'),
+    dateTo: dateRange.to.toLocaleDateString('ru-RU'),
     tokens: aggregatedTokens.map(t => ({
       symbol: t.symbol,
       name: t.name,
@@ -86,7 +99,7 @@ export default function Dashboard() {
       to_address: tx.to_address,
       hash: tx.hash,
     })),
-  }), [aggregatedTokens, filteredTxs]);
+  }), [aggregatedTokens, filteredTxs, activePortfolios, totalReceived, totalSent, dateRange]);
 
   if (isLoading) {
     return (
@@ -146,7 +159,7 @@ export default function Dashboard() {
       </div>
 
       {/* All Tokens Table */}
-      <TokenTable tokens={aggregatedTokens} />
+      <TokenTable tokens={aggregatedTokens} totalValue={totalValue} />
 
       {/* Transactions */}
       {txLoading ? (

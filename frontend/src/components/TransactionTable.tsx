@@ -28,6 +28,14 @@ export default function TransactionTable({ transactions }: Props) {
 
   const isDefault = sortKey === DEFAULT_KEY && sortDir === DEFAULT_DIR;
 
+  const totalReceived = transactions
+    .filter(tx => tx.type === 'receive')
+    .reduce((sum, tx) => sum + (tx.value_usd || 0), 0);
+
+  const totalSent = transactions
+    .filter(tx => tx.type === 'send')
+    .reduce((sum, tx) => sum + (tx.value_usd || 0), 0);
+
   if (transactions.length === 0) {
     return (
       <div className="rounded-xl border border-gray-200 bg-white p-8 text-center shadow-sm">
@@ -74,6 +82,16 @@ export default function TransactionTable({ transactions }: Props) {
       <div className="mb-4 flex items-center gap-2">
         <h2 className="text-lg font-semibold text-gray-900">Transactions</h2>
         <span className="text-sm text-gray-400">{transactions.length} results</span>
+        {totalReceived > 0 && (
+          <span className="text-sm font-medium text-green-600">
+            +${totalReceived.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </span>
+        )}
+        {totalSent > 0 && (
+          <span className="text-sm font-medium text-orange-600">
+            -${totalSent.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </span>
+        )}
         <button
           onClick={reset}
           title="Reset sorting"

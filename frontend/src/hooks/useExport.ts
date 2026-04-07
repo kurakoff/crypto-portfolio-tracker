@@ -19,6 +19,11 @@ interface ExportStatus {
 }
 
 interface ExportData {
+  totalValue?: number;
+  totalReceived?: number;
+  totalSent?: number;
+  dateFrom?: string;
+  dateTo?: string;
   tokens?: Array<{
     symbol: string;
     name: string;

@@ -3,6 +3,11 @@ import { useState, useRef, useEffect } from 'react';
 import { copyToClipboard } from '../utils/clipboard';
 
 interface ExportData {
+  totalValue?: number;
+  totalReceived?: number;
+  totalSent?: number;
+  dateFrom?: string;
+  dateTo?: string;
   tokens: Array<{ symbol: string; name: string; balance: string; priceUsd: number; valueUsd: number }>;
   transactions: Array<{
     timestamp: string; wallet_label?: string; wallet_address: string; chain: string;

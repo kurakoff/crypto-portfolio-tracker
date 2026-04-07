@@ -3,6 +3,7 @@ import type { TokenBalance } from '../hooks/usePortfolio';
 
 interface Props {
   tokens: TokenBalance[];
+  totalValue?: number;
 }
 
 type SortKey = 'symbol' | 'balance' | 'price' | 'value';
@@ -11,7 +12,7 @@ type SortDir = 'asc' | 'desc';
 const DEFAULT_KEY: SortKey = 'value';
 const DEFAULT_DIR: SortDir = 'desc';
 
-export default function TokenTable({ tokens }: Props) {
+export default function TokenTable({ tokens, totalValue }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>(DEFAULT_KEY);
   const [sortDir, setSortDir] = useState<SortDir>(DEFAULT_DIR);
 
@@ -48,6 +49,11 @@ export default function TokenTable({ tokens }: Props) {
     <div>
       <div className="mb-4 flex items-center gap-2">
         <h2 className="text-lg font-semibold text-gray-900">All Tokens</h2>
+        {totalValue !== undefined && (
+          <span className="text-sm font-medium text-gray-500">
+            ${totalValue.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </span>
+        )}
         <button
           onClick={reset}
           title="Reset sorting"
