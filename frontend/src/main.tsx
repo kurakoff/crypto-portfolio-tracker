@@ -6,6 +6,7 @@ import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import WalletManager from './pages/WalletManager';
 // import NFTGallery from './pages/NFTGallery';
+import { DateRangeProvider } from './context/DateRangeContext';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -20,15 +21,17 @@ const queryClient = new QueryClient({
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <Routes>
-          <Route element={<Layout />}>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/wallets" element={<WalletManager />} />
-            {/* <Route path="/nfts" element={<NFTGallery />} /> */}
-          </Route>
-        </Routes>
-      </BrowserRouter>
+      <DateRangeProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route element={<Layout />}>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/wallets" element={<WalletManager />} />
+              {/* <Route path="/nfts" element={<NFTGallery />} /> */}
+            </Route>
+          </Routes>
+        </BrowserRouter>
+      </DateRangeProvider>
     </QueryClientProvider>
   </React.StrictMode>
 );

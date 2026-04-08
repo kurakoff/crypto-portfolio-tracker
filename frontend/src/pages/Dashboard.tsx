@@ -1,14 +1,15 @@
-import { useState, useMemo } from 'react';
+import { useMemo } from 'react';
 import { usePortfolio } from '../hooks/usePortfolio';
 import { useTransactions } from '../hooks/useTransactions';
+import { useDateRange } from '../context/DateRangeContext';
 import TransactionTable from '../components/TransactionTable';
 import ExportButton from '../components/ExportButton';
-import DateRangeFilter, { makePresetRange, type DateRange } from '../components/DateRangeFilter';
+import DateRangeFilter from '../components/DateRangeFilter';
 
 export default function Dashboard() {
   const { data: portfolios, isLoading, error } = usePortfolio();
   const { data: transactions, isLoading: txLoading } = useTransactions();
-  const [dateRange, setDateRange] = useState<DateRange>(() => makePresetRange(28));
+  const { dateRange, setDateRange } = useDateRange();
 
   // All wallet IDs
   const allWalletIds = useMemo(() => {

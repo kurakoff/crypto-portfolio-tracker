@@ -159,11 +159,11 @@ export async function exportToSheets(input?: ExportInput): Promise<{
       tx.type || '',
       tx.token_symbol || '',
       tx.value || '0',
-      tx.balance || '',
       tx.value_usd ? `$${tx.value_usd.toFixed(2)}` : '',
       tx.from_address || '',
       tx.to_address || '',
       tx.hash || '',
+      tx.balance || '',
     ]);
   } else {
     const allTxs = db.prepare(`
@@ -179,22 +179,22 @@ export async function exportToSheets(input?: ExportInput): Promise<{
       tx.type || '',
       tx.token_symbol || '',
       tx.value ? parseFloat(tx.value).toFixed(2) : '0',
-      '',
       tx.value_usd ? `$${Number(tx.value_usd).toFixed(2)}` : '',
       tx.from_address || '',
       tx.to_address || '',
       tx.hash || '',
+      '',
     ]);
   }
 
-  const txHeader = ['Date', 'Wallet', 'Chain', 'Type', 'Token', 'Amount', 'Balance after', 'USD', 'From', 'To', 'Hash'];
+  const txHeader = ['Date', 'Wallet', 'Chain', 'Type', 'Token', 'Amount', 'USD', 'From', 'To', 'Hash', 'Balance after'];
 
   // Totals row for transactions
   const txTotalReceived = input?.totalReceived ?? 0;
   const txTotalSent = input?.totalSent ?? 0;
   const txTotalsRow = ['', '', '', '', '', '', '', '', '', '', ''];
-  const txReceivedRow = ['', '', '', 'Total Received', '', '', '', `$${txTotalReceived.toFixed(2)}`, '', '', ''];
-  const txSentRow = ['', '', '', 'Total Sent', '', '', '', `$${txTotalSent.toFixed(2)}`, '', '', ''];
+  const txReceivedRow = ['', '', '', 'Total Received', '', '', `$${txTotalReceived.toFixed(2)}`, '', '', '', ''];
+  const txSentRow = ['', '', '', 'Total Sent', '', '', `$${txTotalSent.toFixed(2)}`, '', '', '', ''];
 
   await ensureSheet(sheets, spreadsheetId, 'Transactions');
   await sheets.spreadsheets.values.clear({ spreadsheetId, range: 'Transactions!A:K' });

@@ -161,10 +161,10 @@ export default function TransactionTable({ transactions, txBalanceMap }: Props) 
                 <th className={thClass} onClick={() => toggle('type')}>Type{arrow('type')}</th>
                 <th className={thClass} onClick={() => toggle('token')}>Token{arrow('token')}</th>
                 <th className={`${thClass} text-right`} onClick={() => toggle('amount')}>Amount{arrow('amount')}</th>
-                <th className={`${thClass} text-right`} onClick={() => toggle('balance')}>Balance after{arrow('balance')}</th>
                 <th className={`${thClass} text-right`} onClick={() => toggle('usd')}>USD{arrow('usd')}</th>
                 <th className={`${thClass}`}>To / From</th>
                 <th className={`${thClass} text-center`}>Tx</th>
+                <th className={`${thClass} text-right`} onClick={() => toggle('balance')}>Balance after{arrow('balance')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -210,9 +210,6 @@ export default function TransactionTable({ transactions, txBalanceMap }: Props) 
                         {isReceive ? '+' : '-'}{amount.toFixed(2)}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums text-gray-600">
-                      {balance != null ? balance.toFixed(2) : '—'}
-                    </td>
                     <td className="px-4 py-3 text-right tabular-nums text-xs text-gray-500">
                       {tx.value_usd && tx.value_usd > 0.01
                         ? `$${tx.value_usd.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -252,6 +249,9 @@ export default function TransactionTable({ transactions, txBalanceMap }: Props) 
                           </svg>
                         </a>
                       )}
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums text-gray-600">
+                      {balance != null ? balance.toFixed(2) : '—'}
                     </td>
                   </tr>
                 );
