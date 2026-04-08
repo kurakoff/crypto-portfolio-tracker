@@ -45,6 +45,24 @@ router.post('/', (req: Request, res: Response) => {
   }
 });
 
+// PATCH /api/wallets/:id — update label
+router.patch('/:id', (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { label } = req.body;
+
+  const result = db.prepare('UPDATE wallets SET label = ? WHERE id = ?')
+    .run(label?.trim() || null, id);
+
+  if (result.changes === 0) {
+    res.status(404).json({ error: 'Wallet not found' });
+    return;
+  }
+
+  invalidatePortfolioCache();
+  const wallet = db.prepare('SELECT * FROM wallets WHERE id = ?').get(id);
+  res.json(wallet);
+});
+
 // DELETE /api/wallets/:id
 router.delete('/:id', (req: Request, res: Response) => {
   const { id } = req.params;

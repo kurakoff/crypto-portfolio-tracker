@@ -22,7 +22,7 @@ interface ExportInput {
   transactions?: Array<{
     timestamp: string; wallet_label?: string; wallet_address: string; chain: string;
     type: string; token_symbol: string; value: string; value_usd: number;
-    from_address: string; to_address: string; hash: string;
+    balance?: string; from_address: string; to_address: string; hash: string;
   }>;
 }
 
@@ -159,6 +159,7 @@ export async function exportToSheets(input?: ExportInput): Promise<{
       tx.type || '',
       tx.token_symbol || '',
       tx.value || '0',
+      tx.balance || '',
       tx.value_usd ? `$${tx.value_usd.toFixed(2)}` : '',
       tx.from_address || '',
       tx.to_address || '',
@@ -177,7 +178,8 @@ export async function exportToSheets(input?: ExportInput): Promise<{
       tx.chain || '',
       tx.type || '',
       tx.token_symbol || '',
-      tx.value || '0',
+      tx.value ? parseFloat(tx.value).toFixed(2) : '0',
+      '',
       tx.value_usd ? `$${Number(tx.value_usd).toFixed(2)}` : '',
       tx.from_address || '',
       tx.to_address || '',
@@ -185,17 +187,17 @@ export async function exportToSheets(input?: ExportInput): Promise<{
     ]);
   }
 
-  const txHeader = ['Date', 'Wallet', 'Chain', 'Type', 'Token', 'Amount', 'USD', 'From', 'To', 'Hash'];
+  const txHeader = ['Date', 'Wallet', 'Chain', 'Type', 'Token', 'Amount', 'Balance after', 'USD', 'From', 'To', 'Hash'];
 
   // Totals row for transactions
   const txTotalReceived = input?.totalReceived ?? 0;
   const txTotalSent = input?.totalSent ?? 0;
-  const txTotalsRow = ['', '', '', '', '', '', '', '', '', ''];
-  const txReceivedRow = ['', '', '', 'Total Received', '', '', `$${txTotalReceived.toFixed(2)}`, '', '', ''];
-  const txSentRow = ['', '', '', 'Total Sent', '', '', `$${txTotalSent.toFixed(2)}`, '', '', ''];
+  const txTotalsRow = ['', '', '', '', '', '', '', '', '', '', ''];
+  const txReceivedRow = ['', '', '', 'Total Received', '', '', '', `$${txTotalReceived.toFixed(2)}`, '', '', ''];
+  const txSentRow = ['', '', '', 'Total Sent', '', '', '', `$${txTotalSent.toFixed(2)}`, '', '', ''];
 
   await ensureSheet(sheets, spreadsheetId, 'Transactions');
-  await sheets.spreadsheets.values.clear({ spreadsheetId, range: 'Transactions!A:J' });
+  await sheets.spreadsheets.values.clear({ spreadsheetId, range: 'Transactions!A:K' });
   const txValues = txRows.length > 0
     ? [txHeader, ...txRows, txTotalsRow, txReceivedRow, txSentRow]
     : [txHeader];

@@ -33,6 +33,16 @@ async function addWallet(data: {
   return res.json();
 }
 
+async function updateWallet(data: { id: number; label: string }): Promise<Wallet> {
+  const res = await fetch(`${API_BASE}/api/wallets/${data.id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ label: data.label }),
+  });
+  if (!res.ok) throw new Error("Failed to update wallet");
+  return res.json();
+}
+
 async function deleteWallet(id: number): Promise<void> {
   const res = await fetch(`${API_BASE}/api/wallets/${id}`, {
     method: "DELETE",
@@ -48,6 +58,17 @@ export function useAddWallet() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: addWallet,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["wallets"] });
+      qc.invalidateQueries({ queryKey: ["portfolio"] });
+    },
+  });
+}
+
+export function useUpdateWallet() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: updateWallet,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["wallets"] });
       qc.invalidateQueries({ queryKey: ["portfolio"] });

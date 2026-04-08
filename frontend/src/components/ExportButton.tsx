@@ -13,7 +13,7 @@ interface ExportData {
   transactions: Array<{
     timestamp: string; wallet_label?: string; wallet_address: string; chain: string;
     type: string; token_symbol: string; value: string; value_usd: number;
-    from_address: string; to_address: string; hash: string;
+    balance?: string; from_address: string; to_address: string; hash: string;
   }>;
 }
 

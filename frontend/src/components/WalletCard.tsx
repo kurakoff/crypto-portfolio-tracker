@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import type { WalletPortfolio } from '../hooks/usePortfolio';
+import { useUpdateWallet } from '../hooks/useWallets';
 import { chainBadge } from '../utils/chains';
 import { copyToClipboard } from '../utils/clipboard';
+import EditableLabel from './EditableLabel';
 
 interface Props {
   portfolio: WalletPortfolio;
@@ -12,6 +14,7 @@ interface Props {
 export default function WalletCard({ portfolio, active, onToggle }: Props) {
   const { wallet, totalValueUsd, tokens } = portfolio;
   const badge = chainBadge(wallet.chain);
+  const updateMutation = useUpdateWallet();
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -50,9 +53,11 @@ export default function WalletCard({ portfolio, active, onToggle }: Props) {
           <span className={`rounded-lg border px-2 py-0.5 text-xs font-bold uppercase ${badge.classes}`}>
             {badge.label}
           </span>
-          <span className="text-sm font-medium text-gray-900">
-            {wallet.label || shortenAddress(wallet.address)}
-          </span>
+          <EditableLabel
+            value={wallet.label || ''}
+            placeholder={shortenAddress(wallet.address)}
+            onSave={label => updateMutation.mutate({ id: wallet.id, label })}
+          />
         </div>
         <span className="text-lg font-bold text-gray-900">
           ${totalValueUsd.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}

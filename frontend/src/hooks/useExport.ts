@@ -41,6 +41,7 @@ interface ExportData {
     token_symbol: string;
     value: string;
     value_usd: number;
+    balance?: string;
     from_address: string;
     to_address: string;
     hash: string;

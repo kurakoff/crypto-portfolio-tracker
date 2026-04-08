@@ -1,8 +1,6 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo } from 'react';
 import { usePortfolio } from '../hooks/usePortfolio';
 import { useTransactions } from '../hooks/useTransactions';
-import WalletCard from '../components/WalletCard';
-import TokenTable from '../components/TokenTable';
 import TransactionTable from '../components/TransactionTable';
 import ExportButton from '../components/ExportButton';
 import DateRangeFilter, { makePresetRange, type DateRange } from '../components/DateRangeFilter';
@@ -11,31 +9,17 @@ export default function Dashboard() {
   const { data: portfolios, isLoading, error } = usePortfolio();
   const { data: transactions, isLoading: txLoading } = useTransactions();
   const [dateRange, setDateRange] = useState<DateRange>(() => makePresetRange(28));
-  const [disabledWallets, setDisabledWallets] = useState<Set<number>>(new Set());
 
-  const toggleWallet = useCallback((id: number) => {
-    setDisabledWallets(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
+  // All wallet IDs
+  const allWalletIds = useMemo(() => {
+    if (!portfolios) return new Set<number>();
+    return new Set(portfolios.map(p => p.wallet.id));
+  }, [portfolios]);
 
-  // Active portfolios (checkbox enabled)
-  const activePortfolios = useMemo(() => {
-    if (!portfolios) return [];
-    return portfolios.filter(p => !disabledWallets.has(p.wallet.id));
-  }, [portfolios, disabledWallets]);
-
-  // Active wallet IDs for transaction filtering
-  const activeWalletIds = useMemo(() => {
-    return new Set(activePortfolios.map(p => p.wallet.id));
-  }, [activePortfolios]);
-
-  // Aggregate tokens only from active wallets
+  // Aggregate tokens from all wallets (for export)
   const aggregatedTokens = useMemo(() => {
-    const allTokens = activePortfolios.flatMap(p => p.tokens);
+    if (!portfolios) return [];
+    const allTokens = portfolios.flatMap(p => p.tokens);
     const tokenMap = new Map<string, typeof allTokens[0]>();
     for (const token of allTokens) {
       const key = token.address;
@@ -51,18 +35,18 @@ export default function Dashboard() {
       }
     }
     return Array.from(tokenMap.values());
-  }, [activePortfolios]);
+  }, [portfolios]);
 
-  // Filter transactions by date range + active wallets
+  // Filter transactions by date range
   const filteredTxs = useMemo(() => {
     if (!transactions) return [];
     return transactions.filter(tx => {
       if (!tx.timestamp) return false;
-      if (!activeWalletIds.has(tx.wallet_id)) return false;
+      if (!allWalletIds.has(tx.wallet_id)) return false;
       const ts = new Date(tx.timestamp).getTime();
       return ts >= dateRange.from.getTime() && ts <= dateRange.to.getTime();
     });
-  }, [transactions, dateRange, activeWalletIds]);
+  }, [transactions, dateRange, allWalletIds]);
 
   // Transaction totals
   const totalReceived = useMemo(() =>
@@ -72,9 +56,49 @@ export default function Dashboard() {
     filteredTxs.filter(tx => tx.type === 'send').reduce((sum, tx) => sum + (tx.value_usd || 0), 0),
     [filteredTxs]);
 
+  // Compute balance-after-transaction map using current portfolio as anchor
+  const txBalanceMap = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!transactions || !portfolios) return map;
+
+    // Current token balances: "walletId-SYMBOL" -> balanceFormatted
+    const currentBal = new Map<string, number>();
+    for (const p of portfolios) {
+      for (const token of p.tokens) {
+        currentBal.set(`${p.wallet.id}-${token.symbol.toUpperCase()}`, token.balanceFormatted);
+      }
+    }
+
+    // Group ALL transactions by wallet+token
+    const groups = new Map<string, typeof transactions>();
+    for (const tx of transactions) {
+      const key = `${tx.wallet_id}-${(tx.token_symbol || '').toUpperCase()}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(tx);
+    }
+
+    for (const [groupKey, txs] of groups) {
+      const sorted = [...txs].sort((a, b) => {
+        const da = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+        const db = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+        return db - da;
+      });
+      let running = currentBal.get(groupKey) || 0;
+      for (const tx of sorted) {
+        map.set(`${tx.hash}-${tx.token_address}`, running);
+        const amount = parseFloat(tx.value || '0');
+        if (tx.type === 'receive') running -= amount;
+        else if (tx.type === 'send') running += amount;
+      }
+    }
+    return map;
+  }, [transactions, portfolios]);
+
+  const totalValue = portfolios?.reduce((sum, p) => sum + p.totalValueUsd, 0) ?? 0;
+
   // Prepare export data
   const exportData = useMemo(() => ({
-    totalValue: activePortfolios.reduce((sum, p) => sum + p.totalValueUsd, 0),
+    totalValue,
     totalReceived,
     totalSent,
     dateFrom: dateRange.from.toLocaleDateString('ru-RU'),
@@ -87,20 +111,24 @@ export default function Dashboard() {
       priceUsd: t.priceUsd,
       valueUsd: t.valueUsd,
     })),
-    transactions: filteredTxs.map(tx => ({
-      timestamp: tx.timestamp ? new Date(tx.timestamp).toLocaleString('ru-RU') : '',
-      wallet_label: tx.wallet_label || undefined,
-      wallet_address: tx.wallet_address,
-      chain: tx.chain,
-      type: tx.type,
-      token_symbol: tx.token_symbol,
-      value: tx.value,
-      value_usd: tx.value_usd,
-      from_address: tx.from_address,
-      to_address: tx.to_address,
-      hash: tx.hash,
-    })),
-  }), [aggregatedTokens, filteredTxs, activePortfolios, totalReceived, totalSent, dateRange]);
+    transactions: filteredTxs.map(tx => {
+      const bal = txBalanceMap.get(`${tx.hash}-${tx.token_address}`);
+      return {
+        timestamp: tx.timestamp ? new Date(tx.timestamp).toLocaleString('ru-RU') : '',
+        wallet_label: tx.wallet_label || undefined,
+        wallet_address: tx.wallet_address,
+        chain: tx.chain,
+        type: tx.type,
+        token_symbol: tx.token_symbol,
+        value: parseFloat(tx.value || '0').toFixed(2),
+        value_usd: tx.value_usd,
+        balance: bal != null ? bal.toFixed(2) : '',
+        from_address: tx.from_address,
+        to_address: tx.to_address,
+        hash: tx.hash,
+      };
+    }),
+  }), [aggregatedTokens, filteredTxs, totalValue, totalReceived, totalSent, dateRange, txBalanceMap]);
 
   if (isLoading) {
     return (
@@ -129,8 +157,6 @@ export default function Dashboard() {
     );
   }
 
-  const totalValue = activePortfolios.reduce((sum, p) => sum + p.totalValueUsd, 0);
-
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -147,28 +173,13 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Wallet Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {portfolios.map(p => (
-          <WalletCard
-            key={p.wallet.id}
-            portfolio={p}
-            active={!disabledWallets.has(p.wallet.id)}
-            onToggle={toggleWallet}
-          />
-        ))}
-      </div>
-
-      {/* All Tokens Table */}
-      <TokenTable tokens={aggregatedTokens} totalValue={totalValue} />
-
       {/* Transactions */}
       {txLoading ? (
         <div className="flex items-center justify-center py-10">
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
         </div>
       ) : (
-        <TransactionTable transactions={filteredTxs} />
+        <TransactionTable transactions={filteredTxs} txBalanceMap={txBalanceMap} />
       )}
     </div>
   );
