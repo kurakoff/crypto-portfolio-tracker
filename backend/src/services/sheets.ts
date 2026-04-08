@@ -23,6 +23,7 @@ interface ExportInput {
     timestamp: string; wallet_label?: string; wallet_address: string; chain: string;
     type: string; token_symbol: string; value: string; value_usd: number;
     balance?: string; from_address: string; to_address: string; hash: string;
+    comment?: string;
   }>;
 }
 
@@ -164,6 +165,7 @@ export async function exportToSheets(input?: ExportInput): Promise<{
       tx.to_address || '',
       tx.hash || '',
       tx.balance || '',
+      tx.comment || '',
     ]);
   } else {
     const allTxs = db.prepare(`
@@ -184,20 +186,21 @@ export async function exportToSheets(input?: ExportInput): Promise<{
       tx.to_address || '',
       tx.hash || '',
       '',
+      tx.comment || '',
     ]);
   }
 
-  const txHeader = ['Date', 'Wallet', 'Chain', 'Type', 'Token', 'Amount', 'USD', 'From', 'To', 'Hash', 'Balance after'];
+  const txHeader = ['Date', 'Wallet', 'Chain', 'Type', 'Token', 'Amount', 'USD', 'From', 'To', 'Hash', 'Balance after', 'Comment'];
 
   // Totals row for transactions
   const txTotalReceived = input?.totalReceived ?? 0;
   const txTotalSent = input?.totalSent ?? 0;
-  const txTotalsRow = ['', '', '', '', '', '', '', '', '', '', ''];
-  const txReceivedRow = ['', '', '', 'Total Received', '', '', `$${txTotalReceived.toFixed(2)}`, '', '', '', ''];
-  const txSentRow = ['', '', '', 'Total Sent', '', '', `$${txTotalSent.toFixed(2)}`, '', '', '', ''];
+  const txTotalsRow = ['', '', '', '', '', '', '', '', '', '', '', ''];
+  const txReceivedRow = ['', '', '', 'Total Received', '', '', `$${txTotalReceived.toFixed(2)}`, '', '', '', '', ''];
+  const txSentRow = ['', '', '', 'Total Sent', '', '', `$${txTotalSent.toFixed(2)}`, '', '', '', '', ''];
 
   await ensureSheet(sheets, spreadsheetId, 'Transactions');
-  await sheets.spreadsheets.values.clear({ spreadsheetId, range: 'Transactions!A:K' });
+  await sheets.spreadsheets.values.clear({ spreadsheetId, range: 'Transactions!A:L' });
   const txValues = txRows.length > 0
     ? [txHeader, ...txRows, txTotalsRow, txReceivedRow, txSentRow]
     : [txHeader];

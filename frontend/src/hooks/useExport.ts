@@ -44,6 +44,7 @@ interface ExportData {
     from_address: string;
     to_address: string;
     hash: string;
+    comment?: string;
   }>;
 }
 

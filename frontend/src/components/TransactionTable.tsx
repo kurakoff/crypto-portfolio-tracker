@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import type { Transaction } from '../hooks/useTransactions';
 import { chainBadge } from '../utils/chains';
 import { copyToClipboard } from '../utils/clipboard';
@@ -29,6 +29,13 @@ function CommentCell({ tx }: { tx: Transaction }) {
   const [value, setValue] = useState(tx.comment || '');
   const [saving, setSaving] = useState(false);
   const savedRef = useRef(tx.comment || '');
+
+  // Sync with server data when React Query refreshes
+  useEffect(() => {
+    const serverVal = tx.comment || '';
+    savedRef.current = serverVal;
+    setValue(serverVal);
+  }, [tx.comment]);
 
   const save = async () => {
     const trimmed = value.trim();

@@ -127,6 +127,7 @@ export default function Dashboard() {
         from_address: tx.from_address,
         to_address: tx.to_address,
         hash: tx.hash,
+        comment: tx.comment || '',
       };
     }),
   }), [aggregatedTokens, filteredTxs, totalValue, totalReceived, totalSent, dateRange, txBalanceMap]);

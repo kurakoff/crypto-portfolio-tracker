@@ -14,6 +14,7 @@ interface ExportData {
     timestamp: string; wallet_label?: string; wallet_address: string; chain: string;
     type: string; token_symbol: string; value: string; value_usd: number;
     balance?: string; from_address: string; to_address: string; hash: string;
+    comment?: string;
   }>;
 }
 
