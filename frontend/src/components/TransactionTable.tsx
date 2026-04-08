@@ -1,7 +1,8 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import type { Transaction } from '../hooks/useTransactions';
 import { chainBadge } from '../utils/chains';
 import { copyToClipboard } from '../utils/clipboard';
+import { apiFetch } from '../utils/api';
 
 interface Props {
   transactions: Transaction[];
@@ -22,6 +23,39 @@ function formatDateRu(d: Date): string {
 
 function formatTimeRu(d: Date): string {
   return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
+function CommentCell({ tx }: { tx: Transaction }) {
+  const [value, setValue] = useState(tx.comment || '');
+  const [saving, setSaving] = useState(false);
+  const savedRef = useRef(tx.comment || '');
+
+  const save = async () => {
+    const trimmed = value.trim();
+    if (trimmed === savedRef.current) return;
+    setSaving(true);
+    try {
+      const res = await apiFetch(`/api/transactions/${tx.id}/comment`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ comment: trimmed }),
+      });
+      if (res.ok) savedRef.current = trimmed;
+    } catch { /* ignore */ }
+    setSaving(false);
+  };
+
+  return (
+    <input
+      type="text"
+      value={value}
+      onChange={e => setValue(e.target.value)}
+      onBlur={save}
+      onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+      placeholder="..."
+      className={`w-full min-w-[80px] max-w-[180px] rounded border border-transparent bg-transparent px-1.5 py-0.5 text-xs text-gray-600 placeholder-gray-300 hover:border-gray-300 focus:border-blue-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 ${saving ? 'opacity-50' : ''}`}
+    />
+  );
 }
 
 export default function TransactionTable({ transactions, txBalanceMap }: Props) {
@@ -165,6 +199,7 @@ export default function TransactionTable({ transactions, txBalanceMap }: Props) 
                 <th className={`${thClass}`}>To / From</th>
                 <th className={`${thClass} text-center`}>Tx</th>
                 <th className={`${thClass} text-right`} onClick={() => toggle('balance')}>Balance after{arrow('balance')}</th>
+                <th className={thClass}>Comment</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -252,6 +287,9 @@ export default function TransactionTable({ transactions, txBalanceMap }: Props) 
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums text-gray-600">
                       {balance != null ? balance.toFixed(2) : '—'}
+                    </td>
+                    <td className="px-4 py-3">
+                      <CommentCell tx={tx} />
                     </td>
                   </tr>
                 );

@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import bcrypt from 'bcryptjs';
 
 export function initSchema(db: Database.Database): void {
   db.exec(`
@@ -48,9 +49,32 @@ export function initSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_snapshots_created ON portfolio_snapshots(created_at);
   `);
 
+  // Settings table for auth
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    );
+  `);
+
+  // Seed default auth credentials
+  const existing = db.prepare('SELECT key FROM settings WHERE key = ?').get('auth_email');
+  if (!existing) {
+    const hash = bcrypt.hashSync('admin123', 10);
+    db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('auth_email', 'denis@directline.pro');
+    db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('auth_password_hash', hash);
+  }
+
   // Migration: add value_usd column if missing
   try {
     db.exec(`ALTER TABLE transactions ADD COLUMN value_usd REAL DEFAULT 0`);
+  } catch {
+    // Column already exists
+  }
+
+  // Migration: add comment column if missing
+  try {
+    db.exec(`ALTER TABLE transactions ADD COLUMN comment TEXT DEFAULT ''`);
   } catch {
     // Column already exists
   }

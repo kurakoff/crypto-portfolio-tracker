@@ -1,6 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-
-const API_BASE = import.meta.env.VITE_API_URL || "";
+import { apiFetch } from "../utils/api";
 
 export interface TokenBalance {
   address: string;
@@ -36,7 +35,7 @@ export interface WalletPortfolio {
 }
 
 async function fetchPortfolio(): Promise<WalletPortfolio[]> {
-  const res = await fetch(`${API_BASE}/api/portfolio`);
+  const res = await apiFetch("/api/portfolio");
   if (!res.ok) throw new Error("Failed to fetch portfolio");
   return res.json();
 }

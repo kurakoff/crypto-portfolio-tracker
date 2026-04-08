@@ -1,6 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-
-const API_BASE = import.meta.env.VITE_API_URL || "";
+import { apiFetch } from "../utils/api";
 
 export interface Wallet {
   id: number;
@@ -11,7 +10,7 @@ export interface Wallet {
 }
 
 async function fetchWallets(): Promise<Wallet[]> {
-  const res = await fetch(`${API_BASE}/api/wallets`);
+  const res = await apiFetch("/api/wallets");
   if (!res.ok) throw new Error("Failed to fetch wallets");
   return res.json();
 }
@@ -21,7 +20,7 @@ async function addWallet(data: {
   chain: string;
   label?: string;
 }): Promise<Wallet> {
-  const res = await fetch(`${API_BASE}/api/wallets`, {
+  const res = await apiFetch("/api/wallets", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -34,7 +33,7 @@ async function addWallet(data: {
 }
 
 async function updateWallet(data: { id: number; label: string }): Promise<Wallet> {
-  const res = await fetch(`${API_BASE}/api/wallets/${data.id}`, {
+  const res = await apiFetch(`/api/wallets/${data.id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ label: data.label }),
@@ -44,7 +43,7 @@ async function updateWallet(data: { id: number; label: string }): Promise<Wallet
 }
 
 async function deleteWallet(id: number): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/wallets/${id}`, {
+  const res = await apiFetch(`/api/wallets/${id}`, {
     method: "DELETE",
   });
   if (!res.ok) throw new Error("Failed to delete wallet");

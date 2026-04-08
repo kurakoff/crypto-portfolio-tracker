@@ -1,6 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import { config } from './config/rpc';
+import { authMiddleware } from './middleware/auth';
+import authRouter from './routes/auth';
 import walletsRouter from './routes/wallets';
 import portfolioRouter from './routes/portfolio';
 import exportRouter from './routes/export';
@@ -11,14 +13,17 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-app.use('/api/wallets', walletsRouter);
-app.use('/api/portfolio', portfolioRouter);
-app.use('/api/export', exportRouter);
-app.use('/api/transactions', transactionsRouter);
-
+// Public routes
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
+app.use('/api/auth', authRouter);
+
+// Protected routes
+app.use('/api/wallets', authMiddleware, walletsRouter);
+app.use('/api/portfolio', authMiddleware, portfolioRouter);
+app.use('/api/export', authMiddleware, exportRouter);
+app.use('/api/transactions', authMiddleware, transactionsRouter);
 
 app.listen(config.port, () => {
   console.log(`Backend running on http://localhost:${config.port}`);

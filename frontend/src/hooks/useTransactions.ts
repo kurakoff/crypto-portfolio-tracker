@@ -1,6 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-
-const API_BASE = import.meta.env.VITE_API_URL || "";
+import { apiFetch } from "../utils/api";
 
 export interface Transaction {
   id: number;
@@ -18,10 +17,11 @@ export interface Transaction {
   wallet_address: string;
   chain: string;
   wallet_label: string | null;
+  comment: string;
 }
 
 async function fetchTransactions(): Promise<Transaction[]> {
-  const res = await fetch(`${API_BASE}/api/transactions`);
+  const res = await apiFetch("/api/transactions");
   if (!res.ok) throw new Error("Failed to fetch transactions");
   return res.json();
 }

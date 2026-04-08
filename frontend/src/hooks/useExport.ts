@@ -1,6 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-
-const API_BASE = import.meta.env.VITE_API_URL || "";
+import { apiFetch } from "../utils/api";
 
 interface ExportResult {
   spreadsheetUrl: string;
@@ -49,7 +48,7 @@ interface ExportData {
 }
 
 async function exportToSheets(data?: ExportData): Promise<ExportResult> {
-  const res = await fetch(`${API_BASE}/api/export/sheets`, {
+  const res = await apiFetch("/api/export/sheets", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data || {}),
@@ -62,7 +61,7 @@ async function exportToSheets(data?: ExportData): Promise<ExportResult> {
 }
 
 async function configureSheet(spreadsheetUrl: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/export/configure`, {
+  const res = await apiFetch("/api/export/configure", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ spreadsheetUrl }),
@@ -74,7 +73,7 @@ async function configureSheet(spreadsheetUrl: string): Promise<void> {
 }
 
 async function fetchExportStatus(): Promise<ExportStatus> {
-  const res = await fetch(`${API_BASE}/api/export/status`);
+  const res = await apiFetch("/api/export/status");
   if (!res.ok) return { configured: false, serviceAccountEmail: "" };
   return res.json();
 }
@@ -103,7 +102,7 @@ export function useDisconnectSheet() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      const res = await fetch(`${API_BASE}/api/export/disconnect`, {
+      const res = await apiFetch("/api/export/disconnect", {
         method: "DELETE",
       });
       if (!res.ok) throw new Error("Failed to disconnect");

@@ -57,6 +57,21 @@ router.get('/', async (_req: Request, res: Response) => {
   }
 });
 
+// PATCH /api/transactions/:id/comment
+router.patch('/:id/comment', (req: Request, res: Response) => {
+  const { comment } = req.body;
+  if (comment == null) {
+    res.status(400).json({ error: 'comment is required' });
+    return;
+  }
+  const result = db.prepare('UPDATE transactions SET comment = ? WHERE id = ?').run(comment, req.params.id);
+  if (result.changes === 0) {
+    res.status(404).json({ error: 'Transaction not found' });
+    return;
+  }
+  res.json({ ok: true });
+});
+
 // GET /api/transactions/:walletId
 router.get('/:walletId', async (req: Request, res: Response) => {
   try {
