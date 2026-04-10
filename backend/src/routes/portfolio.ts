@@ -81,8 +81,9 @@ router.get('/', async (_req: Request, res: Response) => {
     const evmResults = await Promise.all(evmWallets.map(fetchWalletPortfolio));
 
     const otherResults: WalletPortfolio[] = [];
-    for (const w of otherWallets) {
-      otherResults.push(await fetchWalletPortfolio(w));
+    for (let i = 0; i < otherWallets.length; i++) {
+      if (i > 0) await new Promise(r => setTimeout(r, 1500));
+      otherResults.push(await fetchWalletPortfolio(otherWallets[i]));
     }
 
     const portfolios = [...evmResults, ...otherResults]

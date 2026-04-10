@@ -24,7 +24,7 @@ const KNOWN_TRC20: Record<string, { symbol: string; name: string; decimals: numb
 /** Fetch with retry + delay for TronGrid rate limits */
 async function tronFetch(url: string, retries = 2): Promise<any> {
   for (let i = 0; i <= retries; i++) {
-    if (i > 0) await new Promise(r => setTimeout(r, 1000 * i));
+    if (i > 0) await new Promise(r => setTimeout(r, 2000 * i));
     const resp = await fetch(url);
     if (resp.ok) {
       const data = await resp.json() as any;
