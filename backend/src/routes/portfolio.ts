@@ -72,7 +72,21 @@ router.get('/', async (_req: Request, res: Response) => {
     }
 
     const wallets = db.prepare('SELECT * FROM wallets').all() as Wallet[];
-    const portfolios = await Promise.all(wallets.map(fetchWalletPortfolio));
+
+    // Fetch EVM wallets in parallel (Moralis handles concurrency),
+    // but TRON/Solana sequentially to avoid rate limits
+    const evmWallets = wallets.filter(w => w.chain === 'ethereum' || w.chain === 'bsc');
+    const otherWallets = wallets.filter(w => w.chain !== 'ethereum' && w.chain !== 'bsc');
+
+    const evmResults = await Promise.all(evmWallets.map(fetchWalletPortfolio));
+
+    const otherResults: WalletPortfolio[] = [];
+    for (const w of otherWallets) {
+      otherResults.push(await fetchWalletPortfolio(w));
+    }
+
+    const portfolios = [...evmResults, ...otherResults]
+      .sort((a, b) => a.wallet.id - b.wallet.id);
 
     cache.set(cacheKey, portfolios, 120_000);
     res.json(portfolios);

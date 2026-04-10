@@ -21,14 +21,37 @@ const KNOWN_TRC20: Record<string, { symbol: string; name: string; decimals: numb
   'TKkeiboTkxXKJpbmVFbv4a8ov5rAfRDMf9': { symbol: 'SUNDOG', name: 'Sundog', decimals: 18 },
 };
 
+/** Fetch with retry + delay for TronGrid rate limits */
+async function tronFetch(url: string, retries = 2): Promise<any> {
+  for (let i = 0; i <= retries; i++) {
+    if (i > 0) await new Promise(r => setTimeout(r, 1000 * i));
+    const resp = await fetch(url);
+    if (resp.ok) {
+      const data = await resp.json() as any;
+      // TronGrid sometimes returns { success: false } even with 200
+      if (data.success === false && i < retries) {
+        console.warn(`[tron] Retry ${i + 1} for ${url.slice(0, 80)}...`);
+        continue;
+      }
+      return data;
+    }
+    if (resp.status === 429 || resp.status >= 500) {
+      console.warn(`[tron] ${resp.status} — retry ${i + 1} for ${url.slice(0, 80)}...`);
+      continue;
+    }
+    // 4xx (except 429) — don't retry
+    return await resp.json();
+  }
+  return {};
+}
+
 export async function getTronPortfolio(address: string): Promise<{
   nativeBalance: number;
   tokens: TokenBalance[];
   nfts: NFTItem[];
 }> {
   // 1. Account info (TRX balance + TRC-20 list)
-  const accountResp = await fetch(`${API}/v1/accounts/${address}`);
-  const accountData = (await accountResp.json()) as {
+  const accountData = await tronFetch(`${API}/v1/accounts/${address}`) as {
     data?: Array<{
       balance?: number;
       trc20?: Array<Record<string, string>>;
@@ -36,6 +59,9 @@ export async function getTronPortfolio(address: string): Promise<{
   };
 
   const account = accountData.data?.[0];
+  if (!account) {
+    console.warn(`[tron] No account data for ${address.slice(0, 12)}... — response keys: ${Object.keys(accountData).join(',')}`);
+  }
   const trxBalance = (account?.balance || 0) / SUN_PER_TRX;
 
   const nativeToken: TokenBalance = {
@@ -90,8 +116,7 @@ async function getTrc20TokenInfo(contractAddr: string): Promise<Trc20Meta> {
   if (cached) return cached;
 
   try {
-    const resp = await fetch(`${API}/v1/contracts/${contractAddr}`);
-    const data = (await resp.json()) as {
+    const data = await tronFetch(`${API}/v1/contracts/${contractAddr}`) as {
       data?: Array<{ name?: string; symbol?: string; decimals?: number }>;
     };
     const info = data.data?.[0];
@@ -109,18 +134,20 @@ async function getTrc20TokenInfo(contractAddr: string): Promise<Trc20Meta> {
   // Try TronScan API as fallback
   try {
     const resp = await fetch(`https://apilist.tronscanapi.com/api/contract?contract=${contractAddr}`);
-    const data = (await resp.json()) as {
-      data?: Array<{ tokenInfo?: { tokenName?: string; tokenAbbr?: string; tokenDecimal?: number } }>;
-    };
-    const tokenInfo = data.data?.[0]?.tokenInfo;
-    if (tokenInfo?.tokenAbbr) {
-      const meta: Trc20Meta = {
-        name: tokenInfo.tokenName || 'Unknown TRC-20',
-        symbol: tokenInfo.tokenAbbr,
-        decimals: tokenInfo.tokenDecimal ?? 6,
+    if (resp.ok) {
+      const data = (await resp.json()) as {
+        data?: Array<{ tokenInfo?: { tokenName?: string; tokenAbbr?: string; tokenDecimal?: number } }>;
       };
-      cache.set(cacheKey, meta, 24 * 60 * 60 * 1000);
-      return meta;
+      const tokenInfo = data.data?.[0]?.tokenInfo;
+      if (tokenInfo?.tokenAbbr) {
+        const meta: Trc20Meta = {
+          name: tokenInfo.tokenName || 'Unknown TRC-20',
+          symbol: tokenInfo.tokenAbbr,
+          decimals: tokenInfo.tokenDecimal ?? 6,
+        };
+        cache.set(cacheKey, meta, 24 * 60 * 60 * 1000);
+        return meta;
+      }
     }
   } catch { /* fall through */ }
 

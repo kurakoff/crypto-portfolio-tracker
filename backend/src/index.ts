@@ -28,11 +28,18 @@ app.use('/api/transactions', authMiddleware, transactionsRouter);
 
 // Serve frontend static files in production
 const frontendDist = path.resolve(__dirname, '../../frontend/dist');
+console.log(`[spa] Serving static from: ${frontendDist}`);
 app.use(express.static(frontendDist));
 
 // SPA fallback: any non-API route → index.html
 app.get('*', (_req, res) => {
-  res.sendFile(path.join(frontendDist, 'index.html'));
+  const indexPath = path.join(frontendDist, 'index.html');
+  res.sendFile(indexPath, (err) => {
+    if (err) {
+      console.error(`[spa] Failed to serve ${indexPath}:`, err.message);
+      res.status(404).send('index.html not found — check build output path');
+    }
+  });
 });
 
 app.listen(config.port, () => {
