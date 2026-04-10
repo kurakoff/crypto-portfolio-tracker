@@ -1,7 +1,8 @@
 import { useMemo } from 'react';
 import { usePortfolio } from '../hooks/usePortfolio';
-import { useTransactions } from '../hooks/useTransactions';
+import { useTransactions, useAddressLabels } from '../hooks/useTransactions';
 import { useDateRange } from '../context/DateRangeContext';
+import { useDisabledWallets } from '../context/DisabledWalletsContext';
 import TransactionTable from '../components/TransactionTable';
 import ExportButton from '../components/ExportButton';
 import DateRangeFilter from '../components/DateRangeFilter';
@@ -10,17 +11,33 @@ export default function Dashboard() {
   const { data: portfolios, isLoading, error } = usePortfolio();
   const { data: transactions, isLoading: txLoading } = useTransactions();
   const { dateRange, setDateRange } = useDateRange();
+  const { disabledWallets } = useDisabledWallets();
+  const { data: addressLabelsData } = useAddressLabels();
 
-  // All wallet IDs
-  const allWalletIds = useMemo(() => {
-    if (!portfolios) return new Set<number>();
-    return new Set(portfolios.map(p => p.wallet.id));
-  }, [portfolios]);
+  const addressLabels = useMemo(() => {
+    const map = new Map<string, string>();
+    if (addressLabelsData) {
+      for (const al of addressLabelsData) {
+        map.set(`${al.chain}:${al.address.toLowerCase()}`, al.label);
+      }
+    }
+    return map;
+  }, [addressLabelsData]);
 
-  // Aggregate tokens from all wallets (for export)
-  const aggregatedTokens = useMemo(() => {
+  // Active portfolios (exclude disabled wallets)
+  const activePortfolios = useMemo(() => {
     if (!portfolios) return [];
-    const allTokens = portfolios.flatMap(p => p.tokens);
+    return portfolios.filter(p => !disabledWallets.has(p.wallet.id));
+  }, [portfolios, disabledWallets]);
+
+  // All active wallet IDs
+  const allWalletIds = useMemo(() => {
+    return new Set(activePortfolios.map(p => p.wallet.id));
+  }, [activePortfolios]);
+
+  // Aggregate tokens from active wallets (for export)
+  const aggregatedTokens = useMemo(() => {
+    const allTokens = activePortfolios.flatMap(p => p.tokens);
     const tokenMap = new Map<string, typeof allTokens[0]>();
     for (const token of allTokens) {
       const key = token.address;
@@ -95,7 +112,7 @@ export default function Dashboard() {
     return map;
   }, [transactions, portfolios]);
 
-  const totalValue = portfolios?.reduce((sum, p) => sum + p.totalValueUsd, 0) ?? 0;
+  const totalValue = activePortfolios.reduce((sum, p) => sum + p.totalValueUsd, 0);
 
   // Prepare export data
   const exportData = useMemo(() => ({
@@ -128,9 +145,11 @@ export default function Dashboard() {
         to_address: tx.to_address,
         hash: tx.hash,
         comment: tx.comment || '',
+        from_label: addressLabels.get(`${tx.chain}:${tx.from_address.toLowerCase()}`) || '',
+        to_label: addressLabels.get(`${tx.chain}:${tx.to_address.toLowerCase()}`) || '',
       };
     }),
-  }), [aggregatedTokens, filteredTxs, totalValue, totalReceived, totalSent, dateRange, txBalanceMap]);
+  }), [aggregatedTokens, filteredTxs, totalValue, totalReceived, totalSent, dateRange, txBalanceMap, addressLabels]);
 
   if (isLoading) {
     return (

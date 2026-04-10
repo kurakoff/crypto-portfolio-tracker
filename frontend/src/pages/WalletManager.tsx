@@ -1,6 +1,7 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo } from 'react';
 import { useWallets, useDeleteWallet, useUpdateWallet } from '../hooks/useWallets';
 import { usePortfolio } from '../hooks/usePortfolio';
+import { useDisabledWallets } from '../context/DisabledWalletsContext';
 import AddWalletModal from '../components/AddWalletModal';
 import WalletCard from '../components/WalletCard';
 import TokenTable from '../components/TokenTable';
@@ -13,16 +14,7 @@ export default function WalletManager() {
   const { data: portfolios, isLoading: portfolioLoading } = usePortfolio();
   const deleteMutation = useDeleteWallet();
   const updateMutation = useUpdateWallet();
-  const [disabledWallets, setDisabledWallets] = useState<Set<number>>(new Set());
-
-  const toggleWallet = useCallback((id: number) => {
-    setDisabledWallets(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
+  const { disabledWallets, toggleWallet } = useDisabledWallets();
 
   const activePortfolios = useMemo(() => {
     if (!portfolios) return [];

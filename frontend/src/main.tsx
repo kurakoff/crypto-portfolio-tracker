@@ -8,6 +8,7 @@ import WalletManager from './pages/WalletManager';
 import Login from './pages/Login';
 // import NFTGallery from './pages/NFTGallery';
 import { DateRangeProvider } from './context/DateRangeContext';
+import { DisabledWalletsProvider } from './context/DisabledWalletsContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import './index.css';
 
@@ -48,11 +49,13 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <DateRangeProvider>
-          <BrowserRouter>
-            <AppRoutes />
-          </BrowserRouter>
-        </DateRangeProvider>
+        <DisabledWalletsProvider>
+          <DateRangeProvider>
+            <BrowserRouter>
+              <AppRoutes />
+            </BrowserRouter>
+          </DateRangeProvider>
+        </DisabledWalletsProvider>
       </AuthProvider>
     </QueryClientProvider>
   </React.StrictMode>

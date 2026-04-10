@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "../utils/api";
 
 export interface Transaction {
@@ -31,5 +31,42 @@ export function useTransactions() {
     queryKey: ["transactions"],
     queryFn: fetchTransactions,
     refetchInterval: 120_000,
+  });
+}
+
+// Address labels
+export interface AddressLabel {
+  chain: string;
+  address: string;
+  label: string;
+}
+
+async function fetchAddressLabels(): Promise<AddressLabel[]> {
+  const res = await apiFetch("/api/transactions/address-labels");
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export function useAddressLabels() {
+  return useQuery({
+    queryKey: ["addressLabels"],
+    queryFn: fetchAddressLabels,
+  });
+}
+
+export function useSetAddressLabel() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: { chain: string; address: string; label: string }) => {
+      const res = await apiFetch("/api/transactions/address-labels", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Failed to save label");
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["addressLabels"] });
+    },
   });
 }

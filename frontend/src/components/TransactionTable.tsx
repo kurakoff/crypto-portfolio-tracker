@@ -1,7 +1,8 @@
-import { useState, useMemo, useRef, useEffect } from 'react';
-import type { Transaction } from '../hooks/useTransactions';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import type { Transaction, AddressLabel } from '../hooks/useTransactions';
+import { useAddressLabels, useSetAddressLabel } from '../hooks/useTransactions';
 import { chainBadge } from '../utils/chains';
-import { copyToClipboard } from '../utils/clipboard';
 import { apiFetch } from '../utils/api';
 
 interface Props {
@@ -29,6 +30,7 @@ function CommentCell({ tx }: { tx: Transaction }) {
   const [value, setValue] = useState(tx.comment || '');
   const [saving, setSaving] = useState(false);
   const savedRef = useRef(tx.comment || '');
+  const qc = useQueryClient();
 
   // Sync with server data when React Query refreshes
   useEffect(() => {
@@ -37,7 +39,7 @@ function CommentCell({ tx }: { tx: Transaction }) {
     setValue(serverVal);
   }, [tx.comment]);
 
-  const save = async () => {
+  const save = useCallback(async () => {
     const trimmed = value.trim();
     if (trimmed === savedRef.current) return;
     setSaving(true);
@@ -47,10 +49,16 @@ function CommentCell({ tx }: { tx: Transaction }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ comment: trimmed }),
       });
-      if (res.ok) savedRef.current = trimmed;
+      if (res.ok) {
+        savedRef.current = trimmed;
+        // Update React Query cache directly so navigation preserves the value
+        qc.setQueryData<Transaction[]>(['transactions'], old =>
+          old?.map(t => t.id === tx.id ? { ...t, comment: trimmed } : t)
+        );
+      }
     } catch { /* ignore */ }
     setSaving(false);
-  };
+  }, [value, tx.id, qc]);
 
   return (
     <input
@@ -65,19 +73,85 @@ function CommentCell({ tx }: { tx: Transaction }) {
   );
 }
 
+function AddressCell({ address, chain, labels }: { address: string; chain: string; labels: Map<string, string> }) {
+  const [editing, setEditing] = useState(false);
+  const labelKey = `${chain}:${address}`;
+  const existingLabel = labels.get(labelKey) || '';
+  const [value, setValue] = useState(existingLabel);
+  const mutation = useSetAddressLabel();
+
+  useEffect(() => {
+    setValue(labels.get(`${chain}:${address}`) || '');
+  }, [labels, chain, address]);
+
+  const save = () => {
+    setEditing(false);
+    const trimmed = value.trim();
+    if (trimmed === existingLabel) return;
+    mutation.mutate({ chain, address, label: trimmed });
+  };
+
+  if (!address) return <span className="text-xs text-gray-400">—</span>;
+
+  return (
+    <div className="min-w-[120px]">
+      {existingLabel && !editing && (
+        <div
+          className="text-xs font-medium text-blue-600 cursor-pointer hover:text-blue-800 mb-0.5"
+          onClick={() => setEditing(true)}
+          title="Click to edit label"
+        >
+          {existingLabel}
+        </div>
+      )}
+      {editing ? (
+        <input
+          type="text"
+          value={value}
+          onChange={e => setValue(e.target.value)}
+          onBlur={save}
+          onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') setEditing(false); }}
+          autoFocus
+          placeholder="Label..."
+          className="w-full rounded border border-blue-400 bg-white px-1.5 py-0.5 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-400"
+        />
+      ) : (
+        <span
+          className="block cursor-pointer break-all font-mono text-xs text-gray-400 hover:text-gray-600 transition-colors"
+          onClick={() => setEditing(true)}
+          title="Click to add label"
+        >
+          {address}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export default function TransactionTable({ transactions, txBalanceMap }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>(DEFAULT_KEY);
   const [sortDir, setSortDir] = useState<SortDir>(DEFAULT_DIR);
-  const [copiedAddr, setCopiedAddr] = useState<string | null>(null);
   const [minUsd, setMinUsd] = useState(1);
   const [stableOnly, setStableOnly] = useState(false);
+  const { data: addressLabelsRaw } = useAddressLabels();
+
+  // Build a map chain:address -> label
+  const addressLabels = useMemo(() => {
+    const m = new Map<string, string>();
+    if (addressLabelsRaw) {
+      for (const al of addressLabelsRaw) {
+        m.set(`${al.chain}:${al.address}`, al.label);
+      }
+    }
+    return m;
+  }, [addressLabelsRaw]);
 
   const isDefault = sortKey === DEFAULT_KEY && sortDir === DEFAULT_DIR;
 
   // Apply filters
   const filtered = useMemo(() => {
     return transactions.filter(tx => {
-      if (minUsd > 0 && (tx.value_usd || 0) < minUsd) return false;
+      if (!tx.value_usd || tx.value_usd < minUsd) return false;
       if (stableOnly && !STABLECOIN_RE.test(tx.token_symbol || '')) return false;
       return true;
     });
@@ -127,12 +201,6 @@ export default function TransactionTable({ transactions, txBalanceMap }: Props) 
     sortKey === key ? (sortDir === 'asc' ? ' \u2191' : ' \u2193') : '';
 
   const thClass = 'px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500 cursor-pointer select-none hover:text-gray-700 transition-colors';
-
-  const handleCopy = (addr: string, key: string) => {
-    copyToClipboard(addr);
-    setCopiedAddr(key);
-    setTimeout(() => setCopiedAddr(null), 3000);
-  };
 
   return (
     <div>
@@ -259,23 +327,12 @@ export default function TransactionTable({ transactions, txBalanceMap }: Props) 
                           ? '<$0.01'
                           : '—'}
                     </td>
-                    <td className="max-w-[200px] px-4 py-3">
-                      {(() => {
-                        const addr = isReceive ? tx.from_address : tx.to_address;
-                        const key = `${tx.hash}-${addr}`;
-                        const isCopied = copiedAddr === key;
-                        return isCopied ? (
-                          <span className="text-xs font-medium text-green-600">Copied!</span>
-                        ) : (
-                          <span
-                            className="block cursor-pointer break-all font-mono text-xs text-gray-400 hover:text-gray-600 transition-colors"
-                            onClick={() => handleCopy(addr, key)}
-                            title="Click to copy"
-                          >
-                            {addr || '—'}
-                          </span>
-                        );
-                      })()}
+                    <td className="max-w-[220px] px-4 py-3">
+                      <AddressCell
+                        address={isReceive ? tx.from_address : tx.to_address}
+                        chain={tx.chain}
+                        labels={addressLabels}
+                      />
                     </td>
                     <td className="px-4 py-3 text-center">
                       {tx.hash && (

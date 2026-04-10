@@ -33,6 +33,28 @@ const NATIVE_COIN_IDS: Record<string, string> = {
   solana: 'solana',
 };
 
+// GET /api/transactions/address-labels — all address labels
+router.get('/address-labels', (_req: Request, res: Response) => {
+  const rows = db.prepare('SELECT chain, address, label FROM address_labels').all();
+  res.json(rows);
+});
+
+// PUT /api/transactions/address-labels — set label for address
+router.put('/address-labels', (req: Request, res: Response) => {
+  const { chain, address, label } = req.body;
+  if (!chain || !address) {
+    res.status(400).json({ error: 'chain and address required' });
+    return;
+  }
+  if (!label || !label.trim()) {
+    db.prepare('DELETE FROM address_labels WHERE chain = ? AND address = ?').run(chain, address);
+  } else {
+    db.prepare('INSERT INTO address_labels (chain, address, label) VALUES (?, ?, ?) ON CONFLICT(chain, address) DO UPDATE SET label = excluded.label')
+      .run(chain, address, label.trim());
+  }
+  res.json({ ok: true });
+});
+
 // GET /api/transactions — all transactions across wallets
 router.get('/', async (_req: Request, res: Response) => {
   try {
@@ -233,9 +255,13 @@ async function syncLegacyTransactions(wallet: Wallet): Promise<void> {
 
   if (allTxs.length === 0) return;
 
+  // Estimate USD for stablecoins ($1 per token)
+  const STABLECOIN_RE = /^(usdt|usdc|busd|tusd|dai|fdusd|pyusd)$/i;
   const records: TxRecord[] = allTxs.map(tx => ({
     ...tx,
-    valueUsd: 0,
+    valueUsd: STABLECOIN_RE.test(tx.tokenSymbol)
+      ? parseFloat(tx.value || '0')
+      : 0,
   }));
 
   insertTransactions(wallet.id, records);

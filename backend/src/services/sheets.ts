@@ -24,6 +24,8 @@ interface ExportInput {
     type: string; token_symbol: string; value: string; value_usd: number;
     balance?: string; from_address: string; to_address: string; hash: string;
     comment?: string;
+    from_label?: string;
+    to_label?: string;
   }>;
 }
 
@@ -161,7 +163,9 @@ export async function exportToSheets(input?: ExportInput): Promise<{
       tx.token_symbol || '',
       tx.value || '0',
       tx.value_usd ? `$${tx.value_usd.toFixed(2)}` : '',
+      tx.from_label || '',
       tx.from_address || '',
+      tx.to_label || '',
       tx.to_address || '',
       tx.hash || '',
       tx.balance || '',
@@ -174,6 +178,13 @@ export async function exportToSheets(input?: ExportInput): Promise<{
       JOIN wallets w ON t.wallet_id = w.id
       ORDER BY t.timestamp DESC
     `).all() as any[];
+    // Load address labels for DB fallback path
+    const labelRows = db.prepare('SELECT chain, address, label FROM address_labels').all() as any[];
+    const labelMap = new Map<string, string>();
+    for (const r of labelRows) {
+      labelMap.set(`${r.chain}:${r.address.toLowerCase()}`, r.label);
+    }
+
     txRows = allTxs.map(tx => [
       tx.timestamp ? new Date(tx.timestamp).toLocaleString('ru-RU') : '',
       `${tx.wallet_label || ''} (${tx.wallet_address?.slice(0, 8)}...)`,
@@ -182,7 +193,9 @@ export async function exportToSheets(input?: ExportInput): Promise<{
       tx.token_symbol || '',
       tx.value ? parseFloat(tx.value).toFixed(2) : '0',
       tx.value_usd ? `$${Number(tx.value_usd).toFixed(2)}` : '',
+      labelMap.get(`${tx.chain}:${(tx.from_address || '').toLowerCase()}`) || '',
       tx.from_address || '',
+      labelMap.get(`${tx.chain}:${(tx.to_address || '').toLowerCase()}`) || '',
       tx.to_address || '',
       tx.hash || '',
       '',
@@ -190,17 +203,17 @@ export async function exportToSheets(input?: ExportInput): Promise<{
     ]);
   }
 
-  const txHeader = ['Date', 'Wallet', 'Chain', 'Type', 'Token', 'Amount', 'USD', 'From', 'To', 'Hash', 'Balance after', 'Comment'];
+  const txHeader = ['Date', 'Wallet', 'Chain', 'Type', 'Token', 'Amount', 'USD', 'From Label', 'From', 'To Label', 'To', 'Hash', 'Balance after', 'Comment'];
 
   // Totals row for transactions
   const txTotalReceived = input?.totalReceived ?? 0;
   const txTotalSent = input?.totalSent ?? 0;
-  const txTotalsRow = ['', '', '', '', '', '', '', '', '', '', '', ''];
-  const txReceivedRow = ['', '', '', 'Total Received', '', '', `$${txTotalReceived.toFixed(2)}`, '', '', '', '', ''];
-  const txSentRow = ['', '', '', 'Total Sent', '', '', `$${txTotalSent.toFixed(2)}`, '', '', '', '', ''];
+  const txTotalsRow = ['', '', '', '', '', '', '', '', '', '', '', '', '', ''];
+  const txReceivedRow = ['', '', '', 'Total Received', '', '', `$${txTotalReceived.toFixed(2)}`, '', '', '', '', '', '', ''];
+  const txSentRow = ['', '', '', 'Total Sent', '', '', `$${txTotalSent.toFixed(2)}`, '', '', '', '', '', '', ''];
 
   await ensureSheet(sheets, spreadsheetId, 'Transactions');
-  await sheets.spreadsheets.values.clear({ spreadsheetId, range: 'Transactions!A:L' });
+  await sheets.spreadsheets.values.clear({ spreadsheetId, range: 'Transactions!A:N' });
   const txValues = txRows.length > 0
     ? [txHeader, ...txRows, txTotalsRow, txReceivedRow, txSentRow]
     : [txHeader];

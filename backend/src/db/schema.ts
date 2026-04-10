@@ -78,4 +78,14 @@ export function initSchema(db: Database.Database): void {
   } catch {
     // Column already exists
   }
+
+  // Address labels table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS address_labels (
+      chain TEXT NOT NULL,
+      address TEXT NOT NULL,
+      label TEXT NOT NULL DEFAULT '',
+      PRIMARY KEY (chain, address)
+    );
+  `);
 }

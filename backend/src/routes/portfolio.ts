@@ -202,10 +202,18 @@ async function fetchLegacyPortfolio(wallet: Wallet): Promise<WalletPortfolio> {
     ? await getTokenPrices(platform, tokenAddrs)
     : {};
 
+  // Stablecoins worth $1 regardless of price API
+  const STABLECOIN_SYMBOLS = new Set(['USDT', 'USDC', 'BUSD', 'TUSD', 'DAI', 'USDJ', 'FDUSD', 'PYUSD']);
+
   const enrichedTokens = tokens.map(t => {
-    const priceUsd = t.address === 'native'
-      ? nativePrice
-      : (tokenPrices[t.address.toLowerCase()] || 0);
+    let priceUsd: number;
+    if (t.address === 'native') {
+      priceUsd = nativePrice;
+    } else if (STABLECOIN_SYMBOLS.has(t.symbol.toUpperCase())) {
+      priceUsd = 1;
+    } else {
+      priceUsd = tokenPrices[t.address.toLowerCase()] || 0;
+    }
     return {
       ...t,
       priceUsd,
