@@ -89,7 +89,11 @@ router.get('/', async (_req: Request, res: Response) => {
     const portfolios = [...evmResults, ...otherResults]
       .sort((a, b) => a.wallet.id - b.wallet.id);
 
-    cache.set(cacheKey, portfolios, 120_000);
+    // Don't cache if any wallet returned $0 with no tokens (likely API failure)
+    const hasFailedWallet = portfolios.some(p => p.tokens.length <= 1 && p.totalValueUsd === 0);
+    if (!hasFailedWallet) {
+      cache.set(cacheKey, portfolios, 120_000);
+    }
     res.json(portfolios);
   } catch (err: any) {
     console.error('Portfolio fetch error:', err);
