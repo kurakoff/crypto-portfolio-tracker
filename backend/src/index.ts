@@ -1,6 +1,5 @@
 import express from 'express';
 import cors from 'cors';
-import path from 'path';
 import { config } from './config/rpc';
 import { authMiddleware } from './middleware/auth';
 import authRouter from './routes/auth';
@@ -26,14 +25,9 @@ app.use('/api/portfolio', authMiddleware, portfolioRouter);
 app.use('/api/export', authMiddleware, exportRouter);
 app.use('/api/transactions', authMiddleware, transactionsRouter);
 
-// Serve frontend static files in production
-const frontendDist = path.resolve(__dirname, '../../frontend/dist');
-app.use(express.static(frontendDist));
-
-// SPA fallback: any non-API route → index.html
-app.get('*', (_req, res) => {
-  res.sendFile(path.join(frontendDist, 'index.html'));
-});
+// Note: Frontend is deployed separately (Coolify static site).
+// SPA routing (e.g. /wallets) must be configured in frontend's nginx:
+//   location / { try_files $uri $uri/ /index.html; }
 
 app.listen(config.port, () => {
   console.log(`Backend running on http://localhost:${config.port}`);

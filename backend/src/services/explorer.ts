@@ -161,6 +161,9 @@ export async function getTronTransactions(address: string): Promise<ExplorerTx[]
     const data = (await resp.json()) as { data?: any[] };
 
     for (const tx of data.data || []) {
+      // Skip non-transfer events (approve, etc.)
+      if (tx.type && tx.type !== 'Transfer') continue;
+
       txs.push({
         hash: tx.transaction_id,
         blockNumber: 0,
