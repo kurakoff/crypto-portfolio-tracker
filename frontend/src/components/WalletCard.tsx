@@ -29,7 +29,7 @@ export default function WalletCard({ portfolio, active, onToggle }: Props) {
 
   return (
     <div className={`relative rounded-xl border bg-white p-5 shadow-sm transition-opacity ${active ? 'border-gray-200' : 'border-gray-200 opacity-50'}`}>
-      {/* Checkbox in top-right corner */}
+      {/* Checkbox temporarily disabled
       <button
         onClick={() => onToggle(wallet.id)}
         title={active ? 'Exclude from totals' : 'Include in totals'}
@@ -47,6 +47,7 @@ export default function WalletCard({ portfolio, active, onToggle }: Props) {
           )}
         </div>
       </button>
+      */}
 
       <div className="mb-3 flex items-center justify-between pr-6">
         <div className="flex items-center gap-2">

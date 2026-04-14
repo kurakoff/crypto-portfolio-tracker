@@ -79,6 +79,9 @@ export function initSchema(db: Database.Database): void {
     // Column already exists
   }
 
+  // Migration: clean up approve() transactions with absurd USD values
+  db.exec(`DELETE FROM transactions WHERE value_usd > 1000000000`);
+
   // Address labels table
   db.exec(`
     CREATE TABLE IF NOT EXISTS address_labels (

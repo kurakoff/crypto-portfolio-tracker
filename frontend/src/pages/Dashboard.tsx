@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { usePortfolio } from '../hooks/usePortfolio';
 import { useTransactions, useAddressLabels } from '../hooks/useTransactions';
 import { useDateRange } from '../context/DateRangeContext';
@@ -8,11 +8,12 @@ import ExportButton from '../components/ExportButton';
 import DateRangeFilter from '../components/DateRangeFilter';
 
 export default function Dashboard() {
-  const { data: portfolios, isLoading, error } = usePortfolio();
+  const { data: portfolios, isLoading, error, dataUpdatedAt } = usePortfolio();
   const { data: transactions, isLoading: txLoading } = useTransactions();
   const { dateRange, setDateRange } = useDateRange();
   const { disabledWallets } = useDisabledWallets();
   const { data: addressLabelsData } = useAddressLabels();
+  const [selectedWalletId, setSelectedWalletId] = useState<number | 'all'>('all');
 
   const addressLabels = useMemo(() => {
     const map = new Map<string, string>();
@@ -35,6 +36,13 @@ export default function Dashboard() {
     return new Set(activePortfolios.map(p => p.wallet.id));
   }, [activePortfolios]);
 
+  // Wallet filter options sorted alphabetically
+  const walletOptions = useMemo(() => {
+    return activePortfolios
+      .map(p => ({ id: p.wallet.id, label: p.wallet.label || `${p.wallet.address.slice(0, 6)}...${p.wallet.address.slice(-4)}`, chain: p.wallet.chain }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [activePortfolios]);
+
   // Aggregate tokens from active wallets (for export)
   const aggregatedTokens = useMemo(() => {
     const allTokens = activePortfolios.flatMap(p => p.tokens);
@@ -55,16 +63,17 @@ export default function Dashboard() {
     return Array.from(tokenMap.values());
   }, [portfolios]);
 
-  // Filter transactions by date range
+  // Filter transactions by date range + selected wallet
   const filteredTxs = useMemo(() => {
     if (!transactions) return [];
     return transactions.filter(tx => {
       if (!tx.timestamp) return false;
       if (!allWalletIds.has(tx.wallet_id)) return false;
+      if (selectedWalletId !== 'all' && tx.wallet_id !== selectedWalletId) return false;
       const ts = new Date(tx.timestamp).getTime();
       return ts >= dateRange.from.getTime() && ts <= dateRange.to.getTime();
     });
-  }, [transactions, dateRange, allWalletIds]);
+  }, [transactions, dateRange, allWalletIds, selectedWalletId]);
 
   // Transaction totals
   const totalReceived = useMemo(() =>
@@ -187,8 +196,24 @@ export default function Dashboard() {
           <p className="mt-1 text-3xl font-bold text-gray-900">
             ${totalValue.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </p>
+          {dataUpdatedAt > 0 && (
+            <p className="mt-1 text-xs text-gray-400">
+              Last update: {new Date(dataUpdatedAt).toLocaleString('ru-RU')}
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-3">
+          {/* Wallet filter */}
+          <select
+            value={selectedWalletId}
+            onChange={e => setSelectedWalletId(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+            className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:border-gray-300 transition-colors"
+          >
+            <option value="all">All wallets</option>
+            {walletOptions.map(w => (
+              <option key={w.id} value={w.id}>{w.label} ({w.chain})</option>
+            ))}
+          </select>
           <DateRangeFilter value={dateRange} onChange={setDateRange} />
           <ExportButton exportData={exportData} />
         </div>

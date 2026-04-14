@@ -61,14 +61,15 @@ function CommentCell({ tx }: { tx: Transaction }) {
   }, [value, tx.id, qc]);
 
   return (
-    <input
-      type="text"
+    <textarea
       value={value}
       onChange={e => setValue(e.target.value)}
       onBlur={save}
-      onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+      onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) (e.target as HTMLTextAreaElement).blur(); }}
       placeholder="..."
-      className={`w-full min-w-[80px] max-w-[180px] rounded border border-transparent bg-transparent px-1.5 py-0.5 text-xs text-gray-600 placeholder-gray-300 hover:border-gray-300 focus:border-blue-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 ${saving ? 'opacity-50' : ''}`}
+      rows={2}
+      title={value || undefined}
+      className={`w-full min-w-[200px] resize-none rounded border border-transparent bg-transparent px-1.5 py-1 text-sm leading-snug text-gray-600 placeholder-gray-300 hover:border-gray-300 focus:border-blue-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 ${saving ? 'opacity-50' : ''}`}
     />
   );
 }
