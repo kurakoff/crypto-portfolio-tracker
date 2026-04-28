@@ -112,7 +112,7 @@ export default function Dashboard() {
       });
       let running = currentBal.get(groupKey) || 0;
       for (const tx of sorted) {
-        map.set(`${tx.hash}-${tx.token_address}`, running);
+        map.set(`${tx.id}`, running);
         const amount = parseFloat(tx.value || '0');
         if (tx.type === 'receive') running -= amount;
         else if (tx.type === 'send') running += amount;
@@ -139,7 +139,7 @@ export default function Dashboard() {
       valueUsd: t.valueUsd,
     })),
     transactions: filteredTxs.map(tx => {
-      const bal = txBalanceMap.get(`${tx.hash}-${tx.token_address}`);
+      const bal = txBalanceMap.get(`${tx.id}`);
       return {
         timestamp: tx.timestamp ? new Date(tx.timestamp).toLocaleString('ru-RU') : '',
         wallet_label: tx.wallet_label || undefined,

@@ -16,7 +16,7 @@ type SortDir = 'asc' | 'desc';
 const DEFAULT_KEY: SortKey = 'date';
 const DEFAULT_DIR: SortDir = 'desc';
 
-const STABLECOIN_RE = /^(usdt|usdc|busd|tusd|usdp|dai|frax|lusd|gusd|susd|eusd|usdd|fdusd|pyusd|usd\+)$/i;
+const STABLECOIN_RE = /^(a?eth)?(usdt|usdc|busd|tusd|usdp|dai|frax|lusd|gusd|susd|eusd|usdd|fdusd|pyusd|fusdt|usd\+)$/i;
 
 function formatDateRu(d: Date): string {
   return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
@@ -178,7 +178,7 @@ export default function TransactionTable({ transactions, txBalanceMap }: Props) 
   const reset = () => { setSortKey(DEFAULT_KEY); setSortDir(DEFAULT_DIR); };
 
   const getBalance = (tx: Transaction): number | undefined =>
-    txBalanceMap?.get(`${tx.hash}-${tx.token_address}`);
+    txBalanceMap?.get(`${tx.id}`);
 
   const sorted = [...filtered].sort((a, b) => {
     let cmp = 0;
@@ -287,7 +287,7 @@ export default function TransactionTable({ transactions, txBalanceMap }: Props) 
                 const balance = getBalance(tx);
 
                 return (
-                  <tr key={`${tx.hash}-${tx.token_address}`} className="hover:bg-gray-50 transition-colors">
+                  <tr key={`${tx.id}`} className="hover:bg-gray-50 transition-colors">
                     <td className="whitespace-nowrap px-4 py-3 text-gray-500">
                       {date ? (
                         <>
