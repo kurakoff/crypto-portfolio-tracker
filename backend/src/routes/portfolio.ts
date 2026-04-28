@@ -73,27 +73,24 @@ router.get('/', async (_req: Request, res: Response) => {
 
     const wallets = db.prepare('SELECT * FROM wallets').all() as Wallet[];
 
-    // Fetch EVM wallets in parallel (Moralis handles concurrency),
-    // but TRON/Solana sequentially to avoid rate limits
+    // EVM wallets in parallel, TRON/Solana in batches of 3
     const evmWallets = wallets.filter(w => w.chain === 'ethereum' || w.chain === 'bsc');
     const otherWallets = wallets.filter(w => w.chain !== 'ethereum' && w.chain !== 'bsc');
 
     const evmResults = await Promise.all(evmWallets.map(fetchWalletPortfolio));
 
     const otherResults: WalletPortfolio[] = [];
-    for (let i = 0; i < otherWallets.length; i++) {
-      if (i > 0) await new Promise(r => setTimeout(r, 1500));
-      otherResults.push(await fetchWalletPortfolio(otherWallets[i]));
+    for (let i = 0; i < otherWallets.length; i += 3) {
+      if (i > 0) await new Promise(r => setTimeout(r, 500));
+      const batch = otherWallets.slice(i, i + 3);
+      const batchResults = await Promise.all(batch.map(fetchWalletPortfolio));
+      otherResults.push(...batchResults);
     }
 
     const portfolios = [...evmResults, ...otherResults]
       .sort((a, b) => a.wallet.id - b.wallet.id);
 
-    // Don't cache if any wallet returned $0 with no tokens (likely API failure)
-    const hasFailedWallet = portfolios.some(p => p.tokens.length <= 1 && p.totalValueUsd === 0);
-    if (!hasFailedWallet) {
-      cache.set(cacheKey, portfolios, 300_000); // 5 min
-    }
+    cache.set(cacheKey, portfolios, 300_000); // 5 min
     res.json(portfolios);
   } catch (err: any) {
     console.error('Portfolio fetch error:', err);
