@@ -17,7 +17,10 @@ interface Wallet {
   address: string;
   chain: string;
   label: string | null;
+  last_synced_at: string | null;
 }
+
+const SYNC_THROTTLE_MS = 5 * 60 * 1000; // 5 minutes
 
 const NATIVE_SYMBOLS: Record<string, string> = {
   ethereum: 'ETH',
@@ -135,10 +138,20 @@ interface TxRecord {
 }
 
 async function syncWalletTransactions(wallet: Wallet): Promise<void> {
-  if (isMoralisEnabled() && isMoralisChain(wallet.chain)) {
-    return syncMoralisTransactions(wallet);
+  // Throttle: skip sync if last synced < 5 minutes ago
+  if (wallet.last_synced_at) {
+    const elapsed = Date.now() - new Date(wallet.last_synced_at).getTime();
+    if (elapsed < SYNC_THROTTLE_MS) return;
   }
-  return syncLegacyTransactions(wallet);
+
+  if (isMoralisEnabled() && isMoralisChain(wallet.chain)) {
+    await syncMoralisTransactions(wallet);
+  } else {
+    await syncLegacyTransactions(wallet);
+  }
+
+  // Update last_synced_at
+  db.prepare('UPDATE wallets SET last_synced_at = datetime(\'now\') WHERE id = ?').run(wallet.id);
 }
 
 /**

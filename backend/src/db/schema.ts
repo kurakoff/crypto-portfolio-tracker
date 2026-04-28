@@ -79,6 +79,13 @@ export function initSchema(db: Database.Database): void {
     // Column already exists
   }
 
+  // Migration: add last_synced_at column to wallets
+  try {
+    db.exec(`ALTER TABLE wallets ADD COLUMN last_synced_at TEXT`);
+  } catch {
+    // Column already exists
+  }
+
   // Migration: clean up approve() transactions with absurd USD values
   db.exec(`DELETE FROM transactions WHERE value_usd > 1000000000`);
 

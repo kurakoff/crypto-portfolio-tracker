@@ -15,8 +15,9 @@ import './index.css';
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 30_000,
+      staleTime: 120_000, // 2 min
       retry: 1,
+      refetchOnWindowFocus: false,
     },
   },
 });

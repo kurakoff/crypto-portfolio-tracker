@@ -11,6 +11,28 @@ function headers() {
   return { 'X-API-Key': apiKey(), 'Accept': 'application/json' };
 }
 
+/**
+ * Fetch with 1 retry after 2s delay on transient errors (429, 5xx, network).
+ */
+async function fetchWithRetry(url: string, opts: RequestInit, retries = 1): Promise<globalThis.Response> {
+  try {
+    const resp = await fetch(url, opts);
+    // Only retry on rate-limit or server errors, not 401/403/404
+    if (retries > 0 && (resp.status === 429 || resp.status >= 500)) {
+      await new Promise(r => setTimeout(r, 2000));
+      return fetchWithRetry(url, opts, retries - 1);
+    }
+    return resp;
+  } catch (err) {
+    // Network error — retry
+    if (retries > 0) {
+      await new Promise(r => setTimeout(r, 2000));
+      return fetchWithRetry(url, opts, retries - 1);
+    }
+    throw err;
+  }
+}
+
 // Chain name -> Moralis chain param
 const CHAIN_MAP: Record<string, string> = {
   ethereum: 'eth',
@@ -60,20 +82,22 @@ export async function getWalletTokens(
   if (cached) return cached;
 
   try {
-    const resp = await fetch(
+    const resp = await fetchWithRetry(
       `${BASE}/wallets/${address}/tokens?chain=${mc}`,
       { headers: headers() }
     );
     if (!resp.ok) {
       console.error(`[moralis] tokens ${resp.status}: ${await resp.text().catch(() => '')}`);
+      cache.set(cacheKey, [], 60_000); // cache failure for 60s to avoid spamming
       return [];
     }
     const data = (await resp.json()) as MoralisWalletTokensResponse;
     const tokens = (data.result || []).filter(t => !t.possible_spam);
-    cache.set(cacheKey, tokens, 60_000); // 60s
+    cache.set(cacheKey, tokens, 300_000); // 5 min
     return tokens;
   } catch (err) {
     console.error('[moralis] getWalletTokens error:', err);
+    cache.set(cacheKey, [], 60_000);
     return [];
   }
 }
@@ -147,20 +171,22 @@ export async function getTokenTransfers(
   if (cached) return cached;
 
   try {
-    const resp = await fetch(
+    const resp = await fetchWithRetry(
       `${BASE}/${address}/erc20/transfers?chain=${mc}&limit=${limit}`,
       { headers: headers() }
     );
     if (!resp.ok) {
       console.error(`[moralis] transfers ${resp.status}`);
+      cache.set(cacheKey, [], 60_000);
       return [];
     }
     const data = (await resp.json()) as { result: MoralisTransfer[] };
     const transfers = (data.result || []).filter(t => !t.possible_spam);
-    cache.set(cacheKey, transfers, 60_000);
+    cache.set(cacheKey, transfers, 300_000); // 5 min
     return transfers;
   } catch (err) {
     console.error('[moralis] getTokenTransfers error:', err);
+    cache.set(cacheKey, [], 60_000);
     return [];
   }
 }
@@ -181,16 +207,20 @@ export async function getNativeTransfers(
   if (cached) return cached;
 
   try {
-    const resp = await fetch(
+    const resp = await fetchWithRetry(
       `${BASE}/${address}?chain=${mc}&limit=${limit}`,
       { headers: headers() }
     );
-    if (!resp.ok) return [];
+    if (!resp.ok) {
+      cache.set(cacheKey, [], 60_000);
+      return [];
+    }
     const data = (await resp.json()) as { result: MoralisNativeTx[] };
     const txs = data.result || [];
-    cache.set(cacheKey, txs, 60_000);
+    cache.set(cacheKey, txs, 300_000); // 5 min
     return txs;
   } catch {
+    cache.set(cacheKey, [], 60_000);
     return [];
   }
 }

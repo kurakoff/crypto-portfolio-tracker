@@ -92,7 +92,7 @@ router.get('/', async (_req: Request, res: Response) => {
     // Don't cache if any wallet returned $0 with no tokens (likely API failure)
     const hasFailedWallet = portfolios.some(p => p.tokens.length <= 1 && p.totalValueUsd === 0);
     if (!hasFailedWallet) {
-      cache.set(cacheKey, portfolios, 120_000);
+      cache.set(cacheKey, portfolios, 300_000); // 5 min
     }
     res.json(portfolios);
   } catch (err: any) {
@@ -118,7 +118,10 @@ router.get('/:walletId', async (req: Request, res: Response) => {
     }
 
     const portfolio = await fetchWalletPortfolio(wallet);
-    cache.set(cacheKey, portfolio, 120_000);
+    // Don't cache if it looks like an API failure
+    if (portfolio.tokens.length > 1 || portfolio.totalValueUsd > 0) {
+      cache.set(cacheKey, portfolio, 300_000); // 5 min
+    }
     res.json(portfolio);
   } catch (err: any) {
     console.error('Portfolio fetch error:', err);
@@ -137,11 +140,58 @@ async function fetchWalletPortfolio(wallet: Wallet): Promise<WalletPortfolio> {
 }
 
 /**
+ * Save a successful portfolio snapshot to DB for fallback.
+ */
+function saveSnapshot(walletId: number, portfolio: WalletPortfolio): void {
+  try {
+    db.prepare(
+      `INSERT INTO portfolio_snapshots (wallet_id, data) VALUES (?, ?)`
+    ).run(walletId, JSON.stringify(portfolio));
+    // Keep only the latest 5 snapshots per wallet
+    db.prepare(
+      `DELETE FROM portfolio_snapshots WHERE wallet_id = ? AND id NOT IN (
+        SELECT id FROM portfolio_snapshots WHERE wallet_id = ? ORDER BY created_at DESC LIMIT 5
+      )`
+    ).run(walletId, walletId);
+  } catch (err) {
+    console.error('[snapshot] save error:', err);
+  }
+}
+
+/**
+ * Load the last successful portfolio snapshot from DB.
+ */
+function loadSnapshot(walletId: number): WalletPortfolio | null {
+  try {
+    const row = db.prepare(
+      `SELECT data FROM portfolio_snapshots WHERE wallet_id = ? ORDER BY created_at DESC LIMIT 1`
+    ).get(walletId) as { data: string } | undefined;
+    if (row) return JSON.parse(row.data);
+  } catch (err) {
+    console.error('[snapshot] load error:', err);
+  }
+  return null;
+}
+
+/**
  * Moralis-powered portfolio — single API gives tokens + prices + logos.
  * /wallets/{address}/tokens returns both native + ERC-20 in one call.
  */
 async function fetchMoralisPortfolio(wallet: Wallet): Promise<WalletPortfolio> {
   const moralisTokens = await getWalletTokens(wallet.chain, wallet.address);
+
+  // If Moralis returned nothing, try to use the last saved snapshot
+  if (moralisTokens.length === 0) {
+    console.warn(`[moralis:${wallet.chain}] ${wallet.address.slice(0, 8)}... — empty response, using snapshot fallback`);
+    const snapshot = loadSnapshot(wallet.id);
+    if (snapshot) {
+      // Update wallet reference in case label changed
+      snapshot.wallet = wallet;
+      return snapshot;
+    }
+    // No snapshot available — return empty
+    return { wallet, nativeBalance: 0, tokens: [], nfts: [], totalValueUsd: 0 };
+  }
 
   const nativeInfo = NATIVE_SYMBOLS[wallet.chain] || { symbol: '?', name: '?' };
 
@@ -173,13 +223,18 @@ async function fetchMoralisPortfolio(wallet: Wallet): Promise<WalletPortfolio> {
 
   console.log(`[moralis:${wallet.chain}] ${wallet.address.slice(0, 8)}... — ${allTokens.length} tokens, $${totalValueUsd.toFixed(2)}`);
 
-  return {
+  const portfolio: WalletPortfolio = {
     wallet,
     nativeBalance,
     tokens: allTokens,
     nfts: [],
     totalValueUsd,
   };
+
+  // Save successful result as snapshot
+  saveSnapshot(wallet.id, portfolio);
+
+  return portfolio;
 }
 
 /**
