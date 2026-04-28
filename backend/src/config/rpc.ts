@@ -59,6 +59,10 @@ export const config = {
   googleServiceAccountEmail: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '',
   googlePrivateKey: parsePrivateKey(),
   googleSpreadsheetId: process.env.GOOGLE_SPREADSHEET_ID || '',
-  moralisApiKey: process.env.MORALIS_API_KEY || '',
+  moralisApiKeys: [
+    process.env.MORALIS_API_KEY || '',
+    process.env.MORALIS_API_KEY_2 || '',
+    process.env.MORALIS_API_KEY_3 || '',
+  ].filter(k => k.length > 0),
   port: parseInt(process.env.PORT || '3001', 10),
 };

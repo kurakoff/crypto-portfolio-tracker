@@ -3,8 +3,22 @@ import { config } from '../config/rpc';
 
 const BASE = 'https://deep-index.moralis.io/api/v2.2';
 
+// --- API key rotation ---
+let currentKeyIndex = 0;
+
 function apiKey(): string {
-  return config.moralisApiKey;
+  const keys = config.moralisApiKeys;
+  if (keys.length === 0) return '';
+  return keys[currentKeyIndex % keys.length];
+}
+
+function rotateKey(): boolean {
+  const keys = config.moralisApiKeys;
+  if (keys.length <= 1) return false;
+  const prev = currentKeyIndex;
+  currentKeyIndex = (currentKeyIndex + 1) % keys.length;
+  console.log(`[moralis] Rotating API key: ${prev + 1} → ${currentKeyIndex + 1} of ${keys.length}`);
+  return true;
 }
 
 function headers() {
@@ -12,22 +26,29 @@ function headers() {
 }
 
 /**
- * Fetch with 1 retry after 2s delay on transient errors (429, 5xx, network).
+ * Fetch with retry: rotates API key on 401/429, retries on 5xx/network errors.
+ * keysTried prevents infinite rotation when all keys are exhausted.
  */
-async function fetchWithRetry(url: string, opts: RequestInit, retries = 1): Promise<globalThis.Response> {
+async function fetchWithRetry(url: string, retries = 1, keysTried = 0): Promise<globalThis.Response> {
   try {
-    const resp = await fetch(url, opts);
-    // Only retry on rate-limit or server errors, not 401/403/404
-    if (retries > 0 && (resp.status === 429 || resp.status >= 500)) {
-      await new Promise(r => setTimeout(r, 2000));
-      return fetchWithRetry(url, opts, retries - 1);
+    const resp = await fetch(url, { headers: headers() });
+
+    // 401/429 — try next API key (but stop after trying all keys)
+    if ((resp.status === 401 || resp.status === 429) && keysTried < config.moralisApiKeys.length - 1 && rotateKey()) {
+      return fetchWithRetry(url, retries, keysTried + 1);
     }
+
+    // 5xx — retry with delay
+    if (retries > 0 && resp.status >= 500) {
+      await new Promise(r => setTimeout(r, 2000));
+      return fetchWithRetry(url, retries - 1, keysTried);
+    }
+
     return resp;
   } catch (err) {
-    // Network error — retry
     if (retries > 0) {
       await new Promise(r => setTimeout(r, 2000));
-      return fetchWithRetry(url, opts, retries - 1);
+      return fetchWithRetry(url, retries - 1, keysTried);
     }
     throw err;
   }
@@ -83,8 +104,7 @@ export async function getWalletTokens(
 
   try {
     const resp = await fetchWithRetry(
-      `${BASE}/wallets/${address}/tokens?chain=${mc}`,
-      { headers: headers() }
+      `${BASE}/wallets/${address}/tokens?chain=${mc}`
     );
     if (!resp.ok) {
       console.error(`[moralis] tokens ${resp.status}: ${await resp.text().catch(() => '')}`);
@@ -172,8 +192,7 @@ export async function getTokenTransfers(
 
   try {
     const resp = await fetchWithRetry(
-      `${BASE}/${address}/erc20/transfers?chain=${mc}&limit=${limit}`,
-      { headers: headers() }
+      `${BASE}/${address}/erc20/transfers?chain=${mc}&limit=${limit}`
     );
     if (!resp.ok) {
       console.error(`[moralis] transfers ${resp.status}`);
@@ -208,8 +227,7 @@ export async function getNativeTransfers(
 
   try {
     const resp = await fetchWithRetry(
-      `${BASE}/${address}?chain=${mc}&limit=${limit}`,
-      { headers: headers() }
+      `${BASE}/${address}?chain=${mc}&limit=${limit}`
     );
     if (!resp.ok) {
       cache.set(cacheKey, [], 60_000);
@@ -229,7 +247,7 @@ export async function getNativeTransfers(
  * Check if Moralis is configured (API key present).
  */
 export function isMoralisEnabled(): boolean {
-  return !!apiKey();
+  return config.moralisApiKeys.length > 0;
 }
 
 export function isMoralisChain(chain: string): boolean {
