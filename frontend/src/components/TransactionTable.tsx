@@ -25,6 +25,10 @@ const NATIVE_SYMBOL: Record<string, string> = {
   solana: 'SOL',
 };
 
+function fmtNum(n: number, decimals = 2): string {
+  return n.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+}
+
 function formatDateRu(d: Date): string {
   return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
@@ -218,12 +222,12 @@ export default function TransactionTable({ transactions, txBalanceMap }: Props) 
         <span className="text-sm text-gray-400">{filtered.length} results</span>
         {totalReceived > 0 && (
           <span className="text-sm font-medium text-green-600">
-            +${totalReceived.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            +${fmtNum(totalReceived)}
           </span>
         )}
         {totalSent > 0 && (
           <span className="text-sm font-medium text-orange-600">
-            -${totalSent.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            -${fmtNum(totalSent)}
           </span>
         )}
         <button
@@ -326,12 +330,12 @@ export default function TransactionTable({ transactions, txBalanceMap }: Props) 
                     <td className="px-4 py-3 font-medium text-gray-900">{tx.token_symbol}</td>
                     <td className="px-4 py-3 text-right tabular-nums">
                       <span className={isReceive ? 'text-green-600' : 'text-gray-700'}>
-                        {isReceive ? '+' : '-'}{amount.toFixed(2)}
+                        {isReceive ? '+' : '-'}{fmtNum(amount, tx.token_symbol === 'ETH' ? 4 : 2)}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums text-xs text-gray-500">
                       {tx.value_usd && tx.value_usd > 0.01
-                        ? `$${tx.value_usd.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                        ? `$${fmtNum(tx.value_usd)}`
                         : tx.value_usd && tx.value_usd > 0
                           ? '<$0.01'
                           : '—'}
@@ -339,9 +343,9 @@ export default function TransactionTable({ transactions, txBalanceMap }: Props) 
                     <td className="px-4 py-3 text-right tabular-nums text-xs">
                       {!isReceive && tx.fee_native > 0 ? (
                         <div>
-                          <span className="text-gray-700">{tx.fee_native.toFixed(2)} {NATIVE_SYMBOL[tx.chain] || '?'}</span>
+                          <span className="text-gray-700">{fmtNum(tx.fee_native, tx.chain === 'ethereum' ? 4 : 2)} {NATIVE_SYMBOL[tx.chain] || '?'}</span>
                           {tx.fee_usd > 0 && (
-                            <div className="text-[10px] text-gray-400">${tx.fee_usd.toFixed(2)}</div>
+                            <div className="text-[10px] text-gray-400">${fmtNum(tx.fee_usd)}</div>
                           )}
                         </div>
                       ) : (
@@ -371,7 +375,7 @@ export default function TransactionTable({ transactions, txBalanceMap }: Props) 
                       )}
                     </td>
                     <td className="px-4 py-3 text-right tabular-nums text-gray-600">
-                      {balance != null ? balance.toFixed(2) : '—'}
+                      {balance != null ? fmtNum(balance, tx.token_symbol === 'ETH' ? 4 : 2) : '—'}
                     </td>
                     <td className="px-4 py-3">
                       <CommentCell tx={tx} />
