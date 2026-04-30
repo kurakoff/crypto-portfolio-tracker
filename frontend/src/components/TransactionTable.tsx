@@ -80,7 +80,7 @@ function CommentCell({ tx }: { tx: Transaction }) {
       placeholder="..."
       rows={2}
       title={value || undefined}
-      className={`w-full min-w-[140px] resize-none rounded border border-transparent bg-transparent px-1.5 py-1 text-sm leading-snug text-gray-600 placeholder-gray-300 hover:border-gray-300 focus:border-blue-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 ${saving ? 'opacity-50' : ''}`}
+      className={`w-full min-w-[220px] resize-none rounded border border-transparent bg-transparent px-1.5 py-1 text-sm leading-snug text-gray-600 placeholder-gray-300 hover:border-gray-300 focus:border-blue-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 ${saving ? 'opacity-50' : ''}`}
     />
   );
 }
