@@ -173,6 +173,7 @@ export interface MoralisNativeTx {
   from_address: string;
   to_address: string;
   value: string;
+  transaction_fee?: string;
 }
 
 /**
@@ -241,6 +242,42 @@ export async function getNativeTransfers(
     cache.set(cacheKey, [], 60_000);
     return [];
   }
+}
+
+/**
+ * Batch-fetch transaction fees for EVM send txs.
+ * Returns Map<hash, feeNative> (in ETH/BNB).
+ */
+export async function getTransactionFees(
+  chain: string,
+  hashes: string[]
+): Promise<Map<string, number>> {
+  const mc = moralisChain(chain);
+  const fees = new Map<string, number>();
+  if (!mc || !apiKey() || hashes.length === 0) return fees;
+
+  // Batch in groups of 5
+  for (let i = 0; i < hashes.length; i += 5) {
+    const batch = hashes.slice(i, i + 5);
+    const results = await Promise.all(
+      batch.map(async (hash) => {
+        try {
+          const resp = await fetchWithRetry(
+            `${BASE}/transaction/${hash}?chain=${mc}`
+          );
+          if (!resp.ok) return [hash, 0] as const;
+          const data = (await resp.json()) as { transaction_fee?: string };
+          return [hash, parseFloat(data.transaction_fee || '0')] as const;
+        } catch {
+          return [hash, 0] as const;
+        }
+      })
+    );
+    for (const [hash, fee] of results) {
+      fees.set(hash, fee);
+    }
+  }
+  return fees;
 }
 
 /**

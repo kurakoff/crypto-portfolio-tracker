@@ -14,6 +14,8 @@ export interface Transaction {
   token_address: string;
   type: string;
   value_usd: number;
+  fee_native: number;
+  fee_usd: number;
   wallet_address: string;
   chain: string;
   wallet_label: string | null;

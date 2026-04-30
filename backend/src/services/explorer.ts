@@ -10,6 +10,7 @@ export interface ExplorerTx {
   tokenSymbol: string;
   tokenAddress: string;
   type: string;
+  feeNative?: number;
 }
 
 // ---- Ethereum via Blockscout V2 (no API key needed) ----
@@ -120,6 +121,39 @@ async function blockscoutTokenList(address: string): Promise<ExplorerTokenBalanc
 // BscScan V1 is deprecated. BSC transactions require Etherscan V2 API key.
 // For now, BSC token discovery uses PancakeSwap token list + Multicall.
 // BSC transactions are not available without an API key.
+
+// ---- Tron fee lookup ----
+
+export async function getTronTxFees(hashes: string[]): Promise<Map<string, number>> {
+  const fees = new Map<string, number>();
+  // Batch in groups of 5
+  for (let i = 0; i < hashes.length; i += 5) {
+    const batch = hashes.slice(i, i + 5);
+    const results = await Promise.all(
+      batch.map(async (hash) => {
+        try {
+          const resp = await fetch('https://api.trongrid.io/wallet/gettransactioninfobyid', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ value: hash }),
+          });
+          const data = await resp.json() as any;
+          // energy_fee is in sun (1 TRX = 1e6 sun), also include net_fee
+          const energyFee = data.receipt?.energy_fee || 0;
+          const netFee = data.receipt?.net_fee || 0;
+          const totalFee = (energyFee + netFee) / 1_000_000;
+          return [hash, totalFee] as const;
+        } catch {
+          return [hash, 0] as const;
+        }
+      })
+    );
+    for (const [hash, fee] of results) {
+      fees.set(hash, fee);
+    }
+  }
+  return fees;
+}
 
 // ---- Tron via TronGrid ----
 

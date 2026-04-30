@@ -18,6 +18,13 @@ const DEFAULT_DIR: SortDir = 'desc';
 
 const STABLECOIN_RE = /^(a?eth)?(usdt|usdc|busd|tusd|usdp|dai|frax|lusd|gusd|susd|eusd|usdd|fdusd|pyusd|fusdt|usd\+)$/i;
 
+const NATIVE_SYMBOL: Record<string, string> = {
+  ethereum: 'ETH',
+  bsc: 'BNB',
+  tron: 'TRX',
+  solana: 'SOL',
+};
+
 function formatDateRu(d: Date): string {
   return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
@@ -272,6 +279,7 @@ export default function TransactionTable({ transactions, txBalanceMap }: Props) 
                 <th className={thClass} onClick={() => toggle('token')}>Token{arrow('token')}</th>
                 <th className={`${thClass} text-right`} onClick={() => toggle('amount')}>Amount{arrow('amount')}</th>
                 <th className={`${thClass} text-right`} onClick={() => toggle('usd')}>USD{arrow('usd')}</th>
+                <th className={`${thClass} text-right`}>Fee</th>
                 <th className={`${thClass}`}>To / From</th>
                 <th className={`${thClass} text-center`}>Tx</th>
                 <th className={`${thClass} text-right`} onClick={() => toggle('balance')}>Balance after{arrow('balance')}</th>
@@ -327,6 +335,18 @@ export default function TransactionTable({ transactions, txBalanceMap }: Props) 
                         : tx.value_usd && tx.value_usd > 0
                           ? '<$0.01'
                           : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums text-xs">
+                      {!isReceive && tx.fee_native > 0 ? (
+                        <div>
+                          <span className="text-gray-700">{tx.fee_native.toFixed(2)} {NATIVE_SYMBOL[tx.chain] || '?'}</span>
+                          {tx.fee_usd > 0 && (
+                            <div className="text-[10px] text-gray-400">${tx.fee_usd.toFixed(2)}</div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
                     </td>
                     <td className="max-w-[220px] px-4 py-3">
                       <AddressCell

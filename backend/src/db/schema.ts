@@ -86,6 +86,18 @@ export function initSchema(db: Database.Database): void {
     // Column already exists
   }
 
+  // Migration: add fee columns
+  try {
+    db.exec(`ALTER TABLE transactions ADD COLUMN fee_native REAL DEFAULT 0`);
+  } catch {
+    // Column already exists
+  }
+  try {
+    db.exec(`ALTER TABLE transactions ADD COLUMN fee_usd REAL DEFAULT 0`);
+  } catch {
+    // Column already exists
+  }
+
   // Migration: clean up approve() transactions with absurd USD values
   db.exec(`DELETE FROM transactions WHERE value_usd > 1000000000`);
 
