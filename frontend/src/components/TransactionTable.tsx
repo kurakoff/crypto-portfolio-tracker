@@ -80,7 +80,7 @@ function CommentCell({ tx }: { tx: Transaction }) {
       placeholder="..."
       rows={2}
       title={value || undefined}
-      className={`w-full min-w-[200px] resize-none rounded border border-transparent bg-transparent px-1.5 py-1 text-sm leading-snug text-gray-600 placeholder-gray-300 hover:border-gray-300 focus:border-blue-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 ${saving ? 'opacity-50' : ''}`}
+      className={`w-full min-w-[140px] resize-none rounded border border-transparent bg-transparent px-1.5 py-1 text-sm leading-snug text-gray-600 placeholder-gray-300 hover:border-gray-300 focus:border-blue-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 ${saving ? 'opacity-50' : ''}`}
     />
   );
 }
@@ -212,7 +212,7 @@ export default function TransactionTable({ transactions, txBalanceMap }: Props) 
   const arrow = (key: SortKey) =>
     sortKey === key ? (sortDir === 'asc' ? ' \u2191' : ' \u2193') : '';
 
-  const thClass = 'px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500 cursor-pointer select-none hover:text-gray-700 transition-colors';
+  const thClass = 'px-2 py-2 text-xs font-semibold uppercase tracking-wider text-gray-500 cursor-pointer select-none hover:text-gray-700 transition-colors';
 
   return (
     <div>
@@ -300,7 +300,7 @@ export default function TransactionTable({ transactions, txBalanceMap }: Props) 
 
                 return (
                   <tr key={`${tx.id}`} className="hover:bg-gray-50 transition-colors">
-                    <td className="whitespace-nowrap px-4 py-3 text-gray-500">
+                    <td className="whitespace-nowrap px-2 py-2 text-gray-500">
                       {date ? (
                         <>
                           <div>{formatDateRu(date)}</div>
@@ -308,7 +308,7 @@ export default function TransactionTable({ transactions, txBalanceMap }: Props) 
                         </>
                       ) : '—'}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-2 py-2">
                       <div className="flex items-center gap-1.5">
                         <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${badge.classes}`}>
                           {badge.label}
@@ -318,7 +318,7 @@ export default function TransactionTable({ transactions, txBalanceMap }: Props) 
                         </span>
                       </div>
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-2 py-2">
                       <span className={`inline-block rounded-lg px-2 py-0.5 text-xs font-medium ${
                         isReceive
                           ? 'bg-green-50 text-green-700'
@@ -327,20 +327,20 @@ export default function TransactionTable({ transactions, txBalanceMap }: Props) 
                         {isReceive ? 'Receive' : 'Send'}
                       </span>
                     </td>
-                    <td className="px-4 py-3 font-medium text-gray-900">{tx.token_symbol}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">
+                    <td className="px-2 py-2 font-medium text-gray-900">{tx.token_symbol}</td>
+                    <td className="px-2 py-2 text-right tabular-nums">
                       <span className={isReceive ? 'text-green-600' : 'text-gray-700'}>
                         {isReceive ? '+' : '-'}{fmtNum(amount, tx.token_symbol === 'ETH' ? 4 : 2)}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums text-xs text-gray-500">
+                    <td className="px-2 py-2 text-right tabular-nums text-xs text-gray-500">
                       {tx.value_usd && tx.value_usd > 0.01
                         ? `$${fmtNum(tx.value_usd)}`
                         : tx.value_usd && tx.value_usd > 0
                           ? '<$0.01'
                           : '—'}
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums text-xs">
+                    <td className="px-2 py-2 text-right tabular-nums text-xs">
                       {!isReceive && tx.fee_native > 0 ? (
                         <div>
                           <span className="text-gray-700">{fmtNum(tx.fee_native, tx.chain === 'ethereum' ? 4 : 2)} {NATIVE_SYMBOL[tx.chain] || '?'}</span>
@@ -352,14 +352,14 @@ export default function TransactionTable({ transactions, txBalanceMap }: Props) 
                         <span className="text-gray-300">—</span>
                       )}
                     </td>
-                    <td className="max-w-[220px] px-4 py-3">
+                    <td className="max-w-[160px] px-2 py-2">
                       <AddressCell
                         address={isReceive ? tx.from_address : tx.to_address}
                         chain={tx.chain}
                         labels={addressLabels}
                       />
                     </td>
-                    <td className="px-4 py-3 text-center">
+                    <td className="px-2 py-2 text-center">
                       {tx.hash && (
                         <a
                           href={txExplorerUrl(tx.chain, tx.hash)}
@@ -374,10 +374,10 @@ export default function TransactionTable({ transactions, txBalanceMap }: Props) 
                         </a>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums text-gray-600">
+                    <td className="px-2 py-2 text-right tabular-nums text-gray-600">
                       {balance != null ? fmtNum(balance, tx.token_symbol === 'ETH' ? 4 : 2) : '—'}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-2 py-2">
                       <CommentCell tx={tx} />
                     </td>
                   </tr>
