@@ -53,6 +53,7 @@ function parsePrivateKey(): string {
 export const config = {
   ethRpcUrl: process.env.ETH_RPC_URL || 'https://eth.llamarpc.com',
   bscRpcUrl: process.env.BSC_RPC_URL || 'https://bsc-dataseed1.binance.org',
+  arbRpcUrl: process.env.ARB_RPC_URL || 'https://arb1.arbitrum.io/rpc',
   tronApiUrl: process.env.TRON_API_URL || 'https://api.trongrid.io',
   solRpcUrl: process.env.SOL_RPC_URL || 'https://api.mainnet-beta.solana.com',
   coingeckoBaseUrl: process.env.COINGECKO_BASE_URL || 'https://api.coingecko.com/api/v3',

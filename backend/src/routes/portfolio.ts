@@ -50,6 +50,7 @@ export interface WalletPortfolio {
 const NATIVE_COIN_IDS: Record<string, string> = {
   ethereum: 'ethereum',
   bsc: 'binancecoin',
+  arbitrum: 'ethereum',
   tron: 'tron',
   solana: 'solana',
 };
@@ -57,6 +58,7 @@ const NATIVE_COIN_IDS: Record<string, string> = {
 const NATIVE_SYMBOLS: Record<string, { symbol: string; name: string }> = {
   ethereum: { symbol: 'ETH', name: 'Ethereum' },
   bsc: { symbol: 'BNB', name: 'BNB' },
+  arbitrum: { symbol: 'ETH', name: 'Ethereum' },
   tron: { symbol: 'TRX', name: 'Tron' },
   solana: { symbol: 'SOL', name: 'Solana' },
 };
@@ -74,8 +76,9 @@ router.get('/', async (_req: Request, res: Response) => {
     const wallets = db.prepare('SELECT * FROM wallets').all() as Wallet[];
 
     // EVM wallets in parallel, TRON/Solana in batches of 3
-    const evmWallets = wallets.filter(w => w.chain === 'ethereum' || w.chain === 'bsc');
-    const otherWallets = wallets.filter(w => w.chain !== 'ethereum' && w.chain !== 'bsc');
+    const EVM_CHAINS = new Set(['ethereum', 'bsc', 'arbitrum']);
+    const evmWallets = wallets.filter(w => EVM_CHAINS.has(w.chain));
+    const otherWallets = wallets.filter(w => !EVM_CHAINS.has(w.chain));
 
     const evmResults = await Promise.all(evmWallets.map(fetchWalletPortfolio));
 
@@ -242,7 +245,7 @@ async function fetchLegacyPortfolio(wallet: Wallet): Promise<WalletPortfolio> {
   let nfts: NFTItem[] = [];
   let nativeBalance = 0;
 
-  if (wallet.chain === 'ethereum' || wallet.chain === 'bsc') {
+  if (wallet.chain === 'ethereum' || wallet.chain === 'bsc' || wallet.chain === 'arbitrum') {
     const result = await getEvmPortfolio(wallet.chain, wallet.address);
     tokens = result.tokens;
     nfts = result.nfts;
@@ -265,7 +268,7 @@ async function fetchLegacyPortfolio(wallet: Wallet): Promise<WalletPortfolio> {
 
   // Token prices via CoinGecko
   const COINGECKO_PLATFORMS: Record<string, string> = {
-    ethereum: 'ethereum', bsc: 'binance-smart-chain', tron: 'tron', solana: 'solana',
+    ethereum: 'ethereum', bsc: 'binance-smart-chain', arbitrum: 'arbitrum-one', tron: 'tron', solana: 'solana',
   };
   const tokenAddrs = tokens.filter(t => t.address !== 'native').map(t => t.address);
   const platform = COINGECKO_PLATFORMS[wallet.chain];

@@ -3,6 +3,7 @@ import { cache } from '../cache/memory-cache';
 const CHAIN_MAP: Record<string, string> = {
   ethereum: 'ethereum',
   bsc: 'bsc',
+  arbitrum: 'arbitrum',
   tron: 'tron',
   solana: 'solana',
 };

@@ -44,6 +44,14 @@ const EVM_CHAINS: Record<string, EvmChainConfig> = {
     chainPrefix: 'bsc',
     useTokenList: true,
   },
+  arbitrum: {
+    rpcUrl: config.arbRpcUrl,
+    nativeSymbol: 'ETH',
+    nativeName: 'Ethereum',
+    coingeckoId: 'ethereum',
+    chainPrefix: 'arb',
+    useTokenList: false,
+  },
 };
 
 export function getEvmChainConfig(chain: string): EvmChainConfig | undefined {

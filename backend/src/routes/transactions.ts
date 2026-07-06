@@ -26,6 +26,7 @@ const SYNC_THROTTLE_MS = 5 * 60 * 1000; // 5 minutes
 const NATIVE_SYMBOLS: Record<string, string> = {
   ethereum: 'ETH',
   bsc: 'BNB',
+  arbitrum: 'ETH',
   tron: 'TRX',
   solana: 'SOL',
 };
@@ -33,6 +34,7 @@ const NATIVE_SYMBOLS: Record<string, string> = {
 const NATIVE_COIN_IDS: Record<string, string> = {
   ethereum: 'ethereum',
   bsc: 'binancecoin',
+  arbitrum: 'ethereum',
   tron: 'tron',
   solana: 'solana',
 };
@@ -89,7 +91,7 @@ router.post('/backfill-fees', async (_req: Request, res: Response) => {
 
     // Group by chain
     const tronHashes = rows.filter(r => r.chain === 'tron');
-    const evmRows = rows.filter(r => r.chain === 'ethereum' || r.chain === 'bsc');
+    const evmRows = rows.filter(r => r.chain === 'ethereum' || r.chain === 'bsc' || r.chain === 'arbitrum');
 
     // TRON: batch via getTronTxFees
     if (tronHashes.length > 0) {
@@ -106,7 +108,7 @@ router.post('/backfill-fees', async (_req: Request, res: Response) => {
     }
 
     // EVM: batch via getTransactionFees (Moralis)
-    for (const chain of ['ethereum', 'bsc'] as const) {
+    for (const chain of ['ethereum', 'bsc', 'arbitrum'] as const) {
       const chainRows = evmRows.filter(r => r.chain === chain);
       if (chainRows.length === 0) continue;
       const hashes = chainRows.map(r => r.hash);
@@ -346,7 +348,7 @@ async function syncMoralisTransactions(wallet: Wallet): Promise<void> {
 async function syncLegacyTransactions(wallet: Wallet): Promise<void> {
   let allExplorerTxs: import('../services/explorer').ExplorerTx[] = [];
 
-  if (wallet.chain === 'ethereum' || wallet.chain === 'bsc') {
+  if (wallet.chain === 'ethereum' || wallet.chain === 'bsc' || wallet.chain === 'arbitrum') {
     const [native, tokens] = await Promise.all([
       getNativeTransactions(wallet.chain, wallet.address),
       getTokenTransactions(wallet.chain, wallet.address),

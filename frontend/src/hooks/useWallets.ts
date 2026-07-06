@@ -4,7 +4,7 @@ import { apiFetch } from "../utils/api";
 export interface Wallet {
   id: number;
   address: string;
-  chain: "ethereum" | "bsc" | "tron" | "solana";
+  chain: "ethereum" | "bsc" | "arbitrum" | "tron" | "solana";
   label: string | null;
   created_at: string;
 }

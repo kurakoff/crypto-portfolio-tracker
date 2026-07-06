@@ -58,6 +58,7 @@ async function fetchWithRetry(url: string, retries = 1, keysTried = 0): Promise<
 const CHAIN_MAP: Record<string, string> = {
   ethereum: 'eth',
   bsc: 'bsc',
+  arbitrum: 'arbitrum',
 };
 
 function moralisChain(chain: string): string | undefined {

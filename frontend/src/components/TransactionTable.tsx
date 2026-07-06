@@ -395,6 +395,7 @@ function txExplorerUrl(chain: string, hash: string): string {
   switch (chain) {
     case 'ethereum': return `https://etherscan.io/tx/${hash}`;
     case 'bsc': return `https://bscscan.com/tx/${hash}`;
+    case 'arbitrum': return `https://arbiscan.io/tx/${hash}`;
     case 'tron': return `https://tronscan.org/#/transaction/${hash}`;
     case 'solana': return `https://solscan.io/tx/${hash}`;
     default: return `https://etherscan.io/tx/${hash}`;

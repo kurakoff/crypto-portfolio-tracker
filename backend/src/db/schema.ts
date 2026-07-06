@@ -6,7 +6,7 @@ export function initSchema(db: Database.Database): void {
     CREATE TABLE IF NOT EXISTS wallets (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       address TEXT NOT NULL,
-      chain TEXT NOT NULL CHECK(chain IN ('ethereum', 'bsc', 'tron', 'solana')),
+      chain TEXT NOT NULL CHECK(chain IN ('ethereum', 'bsc', 'arbitrum', 'tron', 'solana')),
       label TEXT,
       created_at TEXT DEFAULT (datetime('now')),
       UNIQUE(address, chain)
@@ -100,6 +100,39 @@ export function initSchema(db: Database.Database): void {
 
   // Migration: clean up approve() transactions with absurd USD values
   db.exec(`DELETE FROM transactions WHERE value_usd > 1000000000`);
+
+  // Migration: widen wallets.chain CHECK constraint to allow new chains (e.g. arbitrum).
+  // SQLite can't ALTER a CHECK constraint, so rebuild the table when it's outdated.
+  try {
+    const walletsSql = (db
+      .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='wallets'")
+      .get() as { sql: string } | undefined)?.sql || '';
+    if (walletsSql && !walletsSql.includes('arbitrum')) {
+      // Rebuild requires FK enforcement off (transactions reference wallets ON DELETE CASCADE)
+      db.pragma('foreign_keys = OFF');
+      db.exec(`
+        BEGIN;
+        CREATE TABLE wallets_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          address TEXT NOT NULL,
+          chain TEXT NOT NULL CHECK(chain IN ('ethereum', 'bsc', 'arbitrum', 'tron', 'solana')),
+          label TEXT,
+          created_at TEXT DEFAULT (datetime('now')),
+          last_synced_at TEXT,
+          UNIQUE(address, chain)
+        );
+        INSERT INTO wallets_new (id, address, chain, label, created_at, last_synced_at)
+          SELECT id, address, chain, label, created_at, last_synced_at FROM wallets;
+        DROP TABLE wallets;
+        ALTER TABLE wallets_new RENAME TO wallets;
+        COMMIT;
+      `);
+      db.pragma('foreign_keys = ON');
+      console.log('[schema] Migrated wallets table — arbitrum chain now allowed');
+    }
+  } catch (err) {
+    console.error('[schema] wallets CHECK migration failed:', err);
+  }
 
   // Address labels table
   db.exec(`

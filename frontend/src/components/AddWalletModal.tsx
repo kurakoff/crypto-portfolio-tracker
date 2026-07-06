@@ -24,6 +24,14 @@ const CHAINS = [
     placeholder: '0x...',
   },
   {
+    id: 'arbitrum',
+    name: 'Arbitrum One',
+    standard: 'ARB (ERC-20)',
+    color: 'border-sky-300 bg-sky-50 text-sky-700',
+    selectedColor: 'border-sky-500 bg-sky-50 ring-2 ring-sky-200',
+    placeholder: '0x...',
+  },
+  {
     id: 'tron',
     name: 'Tron',
     standard: 'TRC-20',

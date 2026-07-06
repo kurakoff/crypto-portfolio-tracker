@@ -23,8 +23,8 @@ router.post('/', (req: Request, res: Response) => {
     return;
   }
 
-  if (!['ethereum', 'bsc', 'tron', 'solana'].includes(chain)) {
-    res.status(400).json({ error: 'chain must be "ethereum", "bsc", "tron" or "solana"' });
+  if (!['ethereum', 'bsc', 'arbitrum', 'tron', 'solana'].includes(chain)) {
+    res.status(400).json({ error: 'chain must be "ethereum", "bsc", "arbitrum", "tron" or "solana"' });
     return;
   }
 

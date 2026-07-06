@@ -34,7 +34,7 @@ function moralisHeaders() {
 }
 
 const MORALIS_BASE = 'https://deep-index.moralis.io/api/v2.2';
-const CHAIN_MAP: Record<string, string> = { ethereum: 'eth', bsc: 'bsc' };
+const CHAIN_MAP: Record<string, string> = { ethereum: 'eth', bsc: 'bsc', arbitrum: 'arbitrum' };
 
 // --- Helpers ---
 
@@ -124,6 +124,7 @@ async function main() {
   const COIN_IDS: Record<string, string> = {
     ethereum: 'ethereum',
     bsc: 'binancecoin',
+    arbitrum: 'ethereum',
     tron: 'tron',
   };
 
@@ -139,7 +140,7 @@ async function main() {
         let fee = 0;
         if (row.chain === 'tron') {
           fee = await fetchTronFee(row.hash);
-        } else if (row.chain === 'ethereum' || row.chain === 'bsc') {
+        } else if (row.chain === 'ethereum' || row.chain === 'bsc' || row.chain === 'arbitrum') {
           fee = await fetchMoralisFee(row.chain, row.hash);
         }
         return { ...row, fee };
