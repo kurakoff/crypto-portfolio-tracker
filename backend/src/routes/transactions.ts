@@ -9,6 +9,7 @@ import {
   getNativeTransfers,
   getWalletTokens,
   getTransactionFees,
+  getWalletHistory,
 } from '../services/moralis';
 
 const router = Router();
@@ -337,6 +338,68 @@ async function syncMoralisTransactions(wallet: Wallet): Promise<void> {
       feeNative,
       feeUsd: feeNative * nativePrice,
     });
+  }
+
+  // Fallback: the legacy /erc20/transfers + native endpoints return nothing for
+  // some wallets/chains (e.g. Arbitrum) even when transfers exist. Only when we
+  // got zero txs above, pull them from the unified /history endpoint. Existing
+  // wallets that already produce txs are never touched by this.
+  if (allTxs.length === 0) {
+    const addr = wallet.address.toLowerCase();
+    const STABLES = new Set(['USDT', 'USDC', 'BUSD', 'TUSD', 'DAI', 'USDJ', 'FDUSD', 'PYUSD']);
+    const history = await getWalletHistory(wallet.chain, wallet.address);
+
+    for (const item of history) {
+      const fee = parseFloat(item.transaction_fee || '0');
+      const blockNumber = parseInt(item.block_number) || 0;
+      const ts = item.block_timestamp || '';
+
+      for (const t of item.erc20_transfers || []) {
+        if (t.possible_spam) continue;
+        const isReceive = t.direction === 'receive' || (t.to_address || '').toLowerCase() === addr;
+        const amount = parseFloat(t.value_formatted || '0');
+        const tokenAddr = (t.address || '').toLowerCase();
+        const price = prices[tokenAddr] || (STABLES.has((t.token_symbol || '').toUpperCase()) ? 1 : 0);
+        const feeNative = isReceive ? 0 : fee;
+
+        allTxs.push({
+          hash: item.hash,
+          blockNumber,
+          timestamp: ts,
+          from: t.from_address,
+          to: t.to_address,
+          value: t.value_formatted || '0',
+          tokenSymbol: t.token_symbol || '?',
+          tokenAddress: t.address || '',
+          type: isReceive ? 'receive' : 'send',
+          valueUsd: amount * price,
+          feeNative,
+          feeUsd: feeNative * nativePrice,
+        });
+      }
+
+      for (const t of item.native_transfers || []) {
+        const amount = parseFloat(t.value_formatted || '0');
+        if (amount === 0) continue;
+        const isReceive = t.direction === 'receive' || (t.to_address || '').toLowerCase() === addr;
+        const feeNative = isReceive ? 0 : fee;
+
+        allTxs.push({
+          hash: item.hash,
+          blockNumber,
+          timestamp: ts,
+          from: t.from_address,
+          to: t.to_address,
+          value: t.value_formatted || '0',
+          tokenSymbol: nativeSymbol,
+          tokenAddress: 'native',
+          type: isReceive ? 'receive' : 'send',
+          valueUsd: amount * nativePrice,
+          feeNative,
+          feeUsd: feeNative * nativePrice,
+        });
+      }
+    }
   }
 
   if (allTxs.length === 0) return;

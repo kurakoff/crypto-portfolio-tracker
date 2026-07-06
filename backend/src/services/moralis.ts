@@ -245,6 +245,64 @@ export async function getNativeTransfers(
   }
 }
 
+// ---- Wallet History (unified endpoint) ----
+// Fallback source: some wallets/chains (e.g. Arbitrum) return nothing from the
+// legacy /erc20/transfers + native endpoints, but the newer
+// /wallets/{address}/history endpoint has the transfers. Used only when the
+// legacy endpoints come back empty, so existing chains are unaffected.
+
+export interface MoralisHistoryTransfer {
+  from_address: string;
+  to_address: string;
+  address?: string;        // token contract (erc20 only)
+  value: string;
+  value_formatted: string;
+  token_symbol: string;
+  direction: string;       // 'send' | 'receive'
+  possible_spam?: boolean;
+}
+
+export interface MoralisHistoryItem {
+  hash: string;
+  block_number: string;
+  block_timestamp: string;
+  transaction_fee?: string;
+  possible_spam?: boolean;
+  erc20_transfers?: MoralisHistoryTransfer[];
+  native_transfers?: MoralisHistoryTransfer[];
+}
+
+export async function getWalletHistory(
+  chain: string,
+  address: string,
+  limit = 100
+): Promise<MoralisHistoryItem[]> {
+  const mc = moralisChain(chain);
+  if (!mc || !apiKey()) return [];
+
+  const cacheKey = `moralis:history:${chain}:${address}`;
+  const cached = cache.get<MoralisHistoryItem[]>(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const resp = await fetchWithRetry(
+      `${BASE}/wallets/${address}/history?chain=${mc}&limit=${limit}`
+    );
+    if (!resp.ok) {
+      cache.set(cacheKey, [], 60_000);
+      return [];
+    }
+    const data = (await resp.json()) as { result: MoralisHistoryItem[] };
+    const items = (data.result || []).filter(i => !i.possible_spam);
+    cache.set(cacheKey, items, 300_000); // 5 min
+    return items;
+  } catch (err) {
+    console.error('[moralis] getWalletHistory error:', err);
+    cache.set(cacheKey, [], 60_000);
+    return [];
+  }
+}
+
 /**
  * Batch-fetch transaction fees for EVM send txs.
  * Returns Map<hash, feeNative> (in ETH/BNB).
