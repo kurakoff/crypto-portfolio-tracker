@@ -117,6 +117,106 @@ async function blockscoutTokenList(address: string): Promise<ExplorerTokenBalanc
   }
 }
 
+// ---- Ethereum full tx sync via Blockscout (reliable, keyless) ----
+// Blockscout is used as the primary Ethereum transaction source instead of the
+// flaky Moralis /erc20/transfers (which returns an inconsistent window). Real
+// tokens carry a market price (token.exchange_rate); address-poisoning fakes do
+// not — so we keep only priced tokens, which drops the look-alike "USDT" spam.
+
+export interface EthBlockscoutTx {
+  hash: string;
+  blockNumber: number;
+  timestamp: string;
+  from: string;
+  to: string;
+  value: string;         // formatted amount
+  tokenSymbol: string;
+  tokenAddress: string;  // lowercased, or 'native'
+  type: 'send' | 'receive';
+  valueUsd: number;      // native filled by caller (needs ETH price)
+  feeNative: number;     // ETH; set for native sends
+}
+
+export async function getEthereumBlockscoutTxs(address: string): Promise<EthBlockscoutTx[]> {
+  const addrL = address.toLowerCase();
+  const cacheKey = `blockscout:full:${addrL}`;
+  const cached = cache.get<EthBlockscoutTx[]>(cacheKey);
+  if (cached) return cached;
+
+  const out: EthBlockscoutTx[] = [];
+
+  // ERC-20 transfers — paginate a few pages; keep only real (priced) tokens.
+  let next: Record<string, string> | null = null;
+  for (let page = 0; page < 5; page++) {
+    const url = next
+      ? `https://eth.blockscout.com/api/v2/addresses/${address}/token-transfers?${new URLSearchParams(next)}`
+      : `https://eth.blockscout.com/api/v2/addresses/${address}/token-transfers?type=ERC-20`;
+    let data: { items?: any[]; next_page_params?: Record<string, string> | null };
+    try {
+      data = (await (await fetch(url)).json()) as any;
+    } catch (err) {
+      console.error('[blockscout] token-transfers failed:', err);
+      break;
+    }
+    for (const item of data.items || []) {
+      const tok = item.token || {};
+      if (tok.exchange_rate == null) continue; // no market price => poisoning fake
+      const decimals = parseInt(tok.decimals || '18');
+      const amount = parseFloat(item.total?.value || '0') / Math.pow(10, decimals);
+      if (!(amount > 0)) continue;
+      const from = (item.from?.hash || '');
+      out.push({
+        hash: (item.transaction_hash || '').toLowerCase(),
+        blockNumber: item.block_number || 0,
+        timestamp: item.timestamp || '',
+        from,
+        to: item.to?.hash || '',
+        value: String(amount),
+        tokenSymbol: tok.symbol || '?',
+        tokenAddress: (tok.address_hash || tok.address || '').toLowerCase(),
+        type: from.toLowerCase() === addrL ? 'send' : 'receive',
+        valueUsd: amount * parseFloat(tok.exchange_rate),
+        feeNative: 0,
+      });
+    }
+    if (!data.next_page_params) break;
+    next = data.next_page_params;
+  }
+
+  // Native ETH transfers (value != 0).
+  try {
+    const data = (await (await fetch(
+      `https://eth.blockscout.com/api/v2/addresses/${address}/transactions?filter=to%7Cfrom`
+    )).json()) as { items?: any[] };
+    for (const item of data.items || []) {
+      if (!item.value || item.value === '0') continue;
+      const amount = parseFloat(item.value) / 1e18;
+      if (!(amount > 0)) continue;
+      const from = (item.from?.hash || '');
+      const isSend = from.toLowerCase() === addrL;
+      const feeNative = item.fee?.value ? parseFloat(item.fee.value) / 1e18 : 0;
+      out.push({
+        hash: (item.hash || '').toLowerCase(),
+        blockNumber: item.block || item.block_number || 0,
+        timestamp: item.timestamp || '',
+        from,
+        to: item.to?.hash || '',
+        value: String(amount),
+        tokenSymbol: 'ETH',
+        tokenAddress: 'native',
+        type: isSend ? 'send' : 'receive',
+        valueUsd: 0, // caller multiplies by ETH price
+        feeNative: isSend ? feeNative : 0,
+      });
+    }
+  } catch (err) {
+    console.error('[blockscout] native tx failed:', err);
+  }
+
+  if (out.length > 0) cache.set(cacheKey, out, 60_000);
+  return out;
+}
+
 // ---- BSC via Etherscan V2 API (requires free API key) ----
 // BscScan V1 is deprecated. BSC transactions require Etherscan V2 API key.
 // For now, BSC token discovery uses PancakeSwap token list + Multicall.

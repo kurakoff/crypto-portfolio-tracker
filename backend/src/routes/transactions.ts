@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import db from '../db/client';
-import { getNativeTransactions, getTokenTransactions, getTronTransactions, getTronTxFees } from '../services/explorer';
+import { getNativeTransactions, getTokenTransactions, getTronTransactions, getTronTxFees, getEthereumBlockscoutTxs } from '../services/explorer';
 import { getNativePrice } from '../services/prices';
 import {
   isMoralisEnabled,
@@ -228,7 +228,11 @@ async function syncWalletTransactions(wallet: Wallet): Promise<void> {
     if (elapsed < SYNC_THROTTLE_MS) return;
   }
 
-  if (isMoralisEnabled() && isMoralisChain(wallet.chain)) {
+  if (wallet.chain === 'ethereum') {
+    // Ethereum: Blockscout is a far more reliable source than Moralis's flaky
+    // /erc20/transfers, and it lets us drop address-poisoning fakes cleanly.
+    await syncEthereumTransactions(wallet);
+  } else if (isMoralisEnabled() && isMoralisChain(wallet.chain)) {
     await syncMoralisTransactions(wallet);
   } else {
     await syncLegacyTransactions(wallet);
@@ -267,6 +271,53 @@ async function getMoralisPrices(
   }
 
   return prices;
+}
+
+async function syncEthereumTransactions(wallet: Wallet): Promise<void> {
+  const txs = await getEthereumBlockscoutTxs(wallet.address);
+
+  // If Blockscout returned nothing, fall back to Moralis so we never regress.
+  if (txs.length === 0) {
+    await syncMoralisTransactions(wallet);
+    return;
+  }
+
+  const ethPrice = await getNativePrice('ethereum');
+
+  // Native USD needs the ETH price (token USD already set from exchange_rate).
+  for (const t of txs) {
+    if (t.tokenAddress === 'native') t.valueUsd = parseFloat(t.value) * ethPrice;
+  }
+
+  // Fees for token sends via Moralis (per-hash, batched, only new ones).
+  const knownFees = getExistingFeeHashes(wallet.id);
+  const sendHashes = txs
+    .filter(t => t.type === 'send' && t.tokenAddress !== 'native' && !knownFees.has(t.hash))
+    .map(t => t.hash);
+  const feeMap = sendHashes.length > 0
+    ? await getTransactionFees('ethereum', sendHashes)
+    : new Map<string, number>();
+
+  const records: TxRecord[] = txs.map(t => {
+    const feeNative = t.tokenAddress === 'native' ? t.feeNative : (feeMap.get(t.hash) || 0);
+    return {
+      hash: t.hash,
+      blockNumber: t.blockNumber,
+      timestamp: t.timestamp,
+      from: t.from,
+      to: t.to,
+      value: t.value,
+      tokenSymbol: t.tokenSymbol,
+      tokenAddress: t.tokenAddress,
+      type: t.type,
+      valueUsd: t.valueUsd,
+      feeNative,
+      feeUsd: feeNative * ethPrice,
+    };
+  });
+
+  console.log(`[blockscout:eth] Syncing ${records.length} txs for ${wallet.address.slice(0, 8)}...`);
+  insertTransactions(wallet.id, records);
 }
 
 async function syncMoralisTransactions(wallet: Wallet): Promise<void> {
