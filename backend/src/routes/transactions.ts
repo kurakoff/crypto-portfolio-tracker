@@ -76,15 +76,25 @@ router.post('/backfill-fees', async (_req: Request, res: Response) => {
       ORDER BY t.timestamp DESC
     `).all(oneMonthAgo) as { id: number; hash: string; chain: string }[];
 
-    if (rows.length === 0) {
-      res.json({ message: 'No transactions to backfill', updated: 0 });
-      return;
-    }
-
     // Get native prices
     const prices: Record<string, number> = {};
     for (const coinId of ['ethereum', 'binancecoin', 'tron']) {
       prices[coinId] = await getNativePrice(coinId);
+    }
+
+    // Rows that already have fee_native but lost fee_usd: just recompute USD
+    let usdRepaired = 0;
+    for (const w of db.prepare('SELECT id, chain FROM wallets').all() as { id: number; chain: string }[]) {
+      const price = prices[NATIVE_COIN_IDS[w.chain]] || 0;
+      if (!(price > 0)) continue;
+      usdRepaired += db.prepare(
+        'UPDATE transactions SET fee_usd = fee_native * ? WHERE wallet_id = ? AND fee_native > 0 AND fee_usd = 0'
+      ).run(price, w.id).changes;
+    }
+
+    if (rows.length === 0) {
+      res.json({ message: 'No transactions to backfill', updated: 0, usdRepaired, prices });
+      return;
     }
 
     const update = db.prepare('UPDATE transactions SET fee_native = ?, fee_usd = ? WHERE id = ?');
@@ -125,7 +135,7 @@ router.post('/backfill-fees', async (_req: Request, res: Response) => {
       }
     }
 
-    res.json({ message: 'Backfill complete', total: rows.length, updated, prices });
+    res.json({ message: 'Backfill complete', total: rows.length, updated, usdRepaired, prices });
   } catch (err: any) {
     console.error('Backfill fees error:', err);
     res.status(500).json({ error: 'Backfill failed', details: err.message });
@@ -219,6 +229,18 @@ function getExistingFeeHashes(walletId: number): Set<string> {
     'SELECT hash FROM transactions WHERE wallet_id = ? AND fee_native > 0'
   ).all(walletId) as { hash: string }[];
   return new Set(rows.map(r => r.hash));
+}
+
+/**
+ * Rows that got fee_native but fee_usd = 0 (price lookup failed during that
+ * sync) are never re-fetched, so fill in the USD value from the current price.
+ */
+function repairMissingFeeUsd(walletId: number, nativePrice: number): void {
+  if (!(nativePrice > 0)) return;
+  const r = db.prepare(
+    'UPDATE transactions SET fee_usd = fee_native * ? WHERE wallet_id = ? AND fee_native > 0 AND fee_usd = 0'
+  ).run(nativePrice, walletId);
+  if (r.changes > 0) console.log(`[fees] Filled fee_usd for ${r.changes} tx(s) of wallet ${walletId}`);
 }
 
 async function syncWalletTransactions(wallet: Wallet): Promise<void> {
@@ -318,6 +340,7 @@ async function syncEthereumTransactions(wallet: Wallet): Promise<void> {
 
   console.log(`[blockscout:eth] Syncing ${records.length} txs for ${wallet.address.slice(0, 8)}...`);
   insertTransactions(wallet.id, records);
+  repairMissingFeeUsd(wallet.id, ethPrice);
 }
 
 async function syncMoralisTransactions(wallet: Wallet): Promise<void> {
@@ -453,6 +476,7 @@ async function syncMoralisTransactions(wallet: Wallet): Promise<void> {
     }
   }
 
+  repairMissingFeeUsd(wallet.id, nativePrice);
   if (allTxs.length === 0) return;
 
   console.log(`[moralis:${wallet.chain}] Syncing ${allTxs.length} txs for ${wallet.address.slice(0, 8)}...`);
@@ -472,13 +496,17 @@ async function syncLegacyTransactions(wallet: Wallet): Promise<void> {
     allExplorerTxs = await getTronTransactions(wallet.address);
   }
 
-  if (allExplorerTxs.length === 0) return;
-
   // Get native price for fee USD calculation (TRON)
   let nativePrice = 0;
   if (wallet.chain === 'tron') {
     const coinId = NATIVE_COIN_IDS[wallet.chain];
     if (coinId) nativePrice = await getNativePrice(coinId);
+    repairMissingFeeUsd(wallet.id, nativePrice);
+  }
+
+  if (allExplorerTxs.length === 0) return;
+
+  if (wallet.chain === 'tron') {
 
     // Fetch TRON fees only for send txs not already in DB
     const knownFees = getExistingFeeHashes(wallet.id);

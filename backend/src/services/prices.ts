@@ -3,6 +3,11 @@ import { cache } from '../cache/memory-cache';
 
 const BASE = config.coingeckoBaseUrl;
 
+// Last successfully fetched price per coin. CoinGecko's free tier returns 429
+// fairly often; without this fallback a single failed call yields price=0 and
+// every fee_usd computed during that sync is stored as 0.
+const lastGoodPrice = new Map<string, number>();
+
 export async function getNativePrice(coinId: string): Promise<number> {
   const cacheKey = `price:native:${coinId}`;
   const cached = cache.get<number>(cacheKey);
@@ -10,13 +15,19 @@ export async function getNativePrice(coinId: string): Promise<number> {
 
   try {
     const resp = await fetch(`${BASE}/simple/price?ids=${coinId}&vs_currencies=usd`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = (await resp.json()) as Record<string, { usd?: number }>;
     const price = data[coinId]?.usd || 0;
-    cache.set(cacheKey, price, 60_000); // 60s
-    return price;
+    if (price > 0) {
+      cache.set(cacheKey, price, 60_000); // 60s — never cache a 0
+      lastGoodPrice.set(coinId, price);
+      return price;
+    }
+    throw new Error('empty price in response');
   } catch (err) {
-    console.error(`Failed to fetch ${coinId} price:`, err);
-    return 0;
+    const fallback = lastGoodPrice.get(coinId) || 0;
+    console.error(`Failed to fetch ${coinId} price (using last known ${fallback}):`, err);
+    return fallback;
   }
 }
 
