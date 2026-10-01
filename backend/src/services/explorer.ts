@@ -183,18 +183,22 @@ export async function getEthereumBlockscoutTxs(address: string): Promise<EthBloc
     next = data.next_page_params;
   }
 
-  // Native ETH transfers (value != 0).
+  // Native ETH transfers (value != 0) + fees of every outgoing tx. A token
+  // send is itself a transaction from this address, so its gas fee is in this
+  // list too — no need for a per-hash Moralis lookup.
+  const outgoingFees = new Map<string, number>();
   try {
     const data = (await (await fetch(
       `https://eth.blockscout.com/api/v2/addresses/${address}/transactions?filter=to%7Cfrom`
     )).json()) as { items?: any[] };
     for (const item of data.items || []) {
-      if (!item.value || item.value === '0') continue;
-      const amount = parseFloat(item.value) / 1e18;
-      if (!(amount > 0)) continue;
       const from = (item.from?.hash || '');
       const isSend = from.toLowerCase() === addrL;
       const feeNative = item.fee?.value ? parseFloat(item.fee.value) / 1e18 : 0;
+      if (isSend && feeNative > 0) outgoingFees.set((item.hash || '').toLowerCase(), feeNative);
+      if (!item.value || item.value === '0') continue;
+      const amount = parseFloat(item.value) / 1e18;
+      if (!(amount > 0)) continue;
       out.push({
         hash: (item.hash || '').toLowerCase(),
         blockNumber: item.block || item.block_number || 0,
@@ -213,8 +217,36 @@ export async function getEthereumBlockscoutTxs(address: string): Promise<EthBloc
     console.error('[blockscout] native tx failed:', err);
   }
 
+  for (const t of out) {
+    if (t.type === 'send' && t.tokenAddress !== 'native' && !t.feeNative) {
+      t.feeNative = outgoingFees.get(t.hash) || 0;
+    }
+  }
+
   if (out.length > 0) cache.set(cacheKey, out, 60_000);
   return out;
+}
+
+/** Per-hash fee lookup on Blockscout (keyless) for txs missing from the address list. */
+export async function getEthBlockscoutTxFees(hashes: string[]): Promise<Map<string, number>> {
+  const fees = new Map<string, number>();
+  for (let i = 0; i < hashes.length; i += 5) {
+    const batch = hashes.slice(i, i + 5);
+    const results = await Promise.all(
+      batch.map(async (hash) => {
+        try {
+          const resp = await fetch(`https://eth.blockscout.com/api/v2/transactions/${hash}`);
+          if (!resp.ok) return [hash, 0] as const;
+          const data = (await resp.json()) as { fee?: { value?: string } };
+          return [hash, data.fee?.value ? parseFloat(data.fee.value) / 1e18 : 0] as const;
+        } catch {
+          return [hash, 0] as const;
+        }
+      })
+    );
+    for (const [hash, fee] of results) if (fee > 0) fees.set(hash, fee);
+  }
+  return fees;
 }
 
 // ---- BSC via Etherscan V2 API (requires free API key) ----

@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import db from '../db/client';
-import { getNativeTransactions, getTokenTransactions, getTronTransactions, getTronTxFees, getEthereumBlockscoutTxs } from '../services/explorer';
+import { getNativeTransactions, getTokenTransactions, getTronTransactions, getTronTxFees, getEthereumBlockscoutTxs, getEthBlockscoutTxFees } from '../services/explorer';
 import { getNativePrice } from '../services/prices';
 import {
   isMoralisEnabled,
@@ -123,7 +123,9 @@ router.post('/backfill-fees', async (_req: Request, res: Response) => {
       const chainRows = evmRows.filter(r => r.chain === chain);
       if (chainRows.length === 0) continue;
       const hashes = chainRows.map(r => r.hash);
-      const feeMap = await getTransactionFees(chain, hashes);
+      const feeMap = chain === 'ethereum'
+        ? await getEthBlockscoutTxFees(hashes)
+        : await getTransactionFees(chain, hashes);
       const coinId = NATIVE_COIN_IDS[chain];
       const nativePrice = prices[coinId] || 0;
       for (const row of chainRows) {
@@ -311,17 +313,25 @@ async function syncEthereumTransactions(wallet: Wallet): Promise<void> {
     if (t.tokenAddress === 'native') t.valueUsd = parseFloat(t.value) * ethPrice;
   }
 
-  // Fees for token sends via Moralis (per-hash, batched, only new ones).
+  // Fees for token sends: most come with the Blockscout address tx list already
+  // (t.feeNative). For the rest (older than the first page) look them up per
+  // hash on Blockscout, then Moralis as a last resort. Only for new hashes.
   const knownFees = getExistingFeeHashes(wallet.id);
-  const sendHashes = txs
-    .filter(t => t.type === 'send' && t.tokenAddress !== 'native' && !knownFees.has(t.hash))
+  const missing = txs
+    .filter(t => t.type === 'send' && t.tokenAddress !== 'native' && !t.feeNative && !knownFees.has(t.hash))
     .map(t => t.hash);
-  const feeMap = sendHashes.length > 0
-    ? await getTransactionFees('ethereum', sendHashes)
+  const feeMap = missing.length > 0
+    ? await getEthBlockscoutTxFees(missing)
     : new Map<string, number>();
+  const stillMissing = missing.filter(h => !feeMap.has(h));
+  if (stillMissing.length > 0) {
+    for (const [h, fee] of await getTransactionFees('ethereum', stillMissing)) {
+      if (fee > 0) feeMap.set(h, fee);
+    }
+  }
 
   const records: TxRecord[] = txs.map(t => {
-    const feeNative = t.tokenAddress === 'native' ? t.feeNative : (feeMap.get(t.hash) || 0);
+    const feeNative = t.feeNative || feeMap.get(t.hash) || 0;
     return {
       hash: t.hash,
       blockNumber: t.blockNumber,
