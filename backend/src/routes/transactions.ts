@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import db from '../db/client';
 import { getTronTxFees, getEthBlockscoutTxFees } from '../services/explorer';
 import { getNativePrice } from '../services/prices';
-import { getTransactionFees } from '../services/moralis';
+import { getTransactionFees, checkMoralisKeys } from '../services/moralis';
 import { syncAllWallets, getSyncStatus, NATIVE_COIN_IDS } from '../services/tx-sync';
 
 const router = Router();
@@ -13,6 +13,12 @@ router.post('/sync', (_req: Request, res: Response) => {
   const before = getSyncStatus();
   void syncAllWallets(true);
   res.status(202).json({ started: !before.running, ...getSyncStatus() });
+});
+
+// GET /api/transactions/moralis-check — probe each configured Moralis key
+router.get('/moralis-check', async (_req: Request, res: Response) => {
+  const keys = await checkMoralisKeys();
+  res.json({ keysConfigured: keys.length, keys });
 });
 
 // GET /api/transactions/sync-status

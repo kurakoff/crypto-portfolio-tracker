@@ -21,6 +21,28 @@ function rotateKey(): boolean {
   return true;
 }
 
+/**
+ * Diagnostic: probe every configured key with one cheap request and report
+ * the HTTP status / message. Keys are shown by index and last 6 chars only.
+ */
+export async function checkMoralisKeys(): Promise<Array<{ index: number; suffix: string; status: number; message: string }>> {
+  const out: Array<{ index: number; suffix: string; status: number; message: string }> = [];
+  const probe = '0x0000000000000000000000000000000000000000';
+  for (let i = 0; i < config.moralisApiKeys.length; i++) {
+    const key = config.moralisApiKeys[i];
+    try {
+      const resp = await fetch(`${BASE}/${probe}/balance?chain=bsc`, { headers: { 'X-API-Key': key, Accept: 'application/json' } });
+      const text = await resp.text();
+      let message = '';
+      try { message = (JSON.parse(text) as { message?: string }).message || ''; } catch { message = text.slice(0, 120); }
+      out.push({ index: i + 1, suffix: key.slice(-6), status: resp.status, message: resp.ok ? 'ok' : message });
+    } catch (err: any) {
+      out.push({ index: i + 1, suffix: key.slice(-6), status: 0, message: String(err?.message || err) });
+    }
+  }
+  return out;
+}
+
 function headers() {
   return { 'X-API-Key': apiKey(), 'Accept': 'application/json' };
 }
