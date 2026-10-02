@@ -12,6 +12,9 @@ import {
 } from '../services/moralis';
 import { isNodeRealEnabled, isNodeRealChain } from '../services/nodereal';
 import { getEthereumBlockscoutPortfolio } from '../services/explorer';
+import { multicallBalances } from '../services/multicall';
+import { ethers } from 'ethers';
+import { config } from '../config/rpc';
 import { saveSnapshot, loadSnapshot } from '../services/snapshots';
 import { refreshNodeRealHoldings } from '../services/tx-sync';
 
@@ -167,10 +170,43 @@ async function fetchWalletPortfolio(wallet: Wallet): Promise<WalletPortfolio> {
 /**
  * Ethereum portfolio via Blockscout (keyless). Snapshot fallback on failure.
  */
+const ETH_RPC_URLS = [config.ethRpcUrl, 'https://ethereum-rpc.publicnode.com', 'https://eth.drpc.org'];
+
+/**
+ * Blockscout's token-balance index can lag or stick (seen: a wallet showing
+ * 592 USDT while the chain says 0.59), so the token list and prices come from
+ * Blockscout but the actual balances are read from the chain via Multicall3.
+ */
+async function readOnChainBalances(address: string, tokens: string[]): Promise<{ native: bigint; tokens: Map<string, bigint> } | null> {
+  for (const url of ETH_RPC_URLS) {
+    try {
+      const provider = new ethers.JsonRpcProvider(url, undefined, { staticNetwork: true });
+      const [native, balances] = await Promise.all([
+        provider.getBalance(address),
+        multicallBalances(provider, address, tokens),
+      ]);
+      return { native, tokens: balances };
+    } catch (err) {
+      console.warn(`[eth-rpc] ${url} failed, trying next:`, (err as Error).message);
+    }
+  }
+  return null;
+}
+
 async function fetchBlockscoutPortfolio(wallet: Wallet): Promise<WalletPortfolio> {
   try {
     const bs = await getEthereumBlockscoutPortfolio(wallet.address);
     const ethPrice = bs.nativePriceUsd || await getNativePrice('ethereum');
+
+    const onChain = await readOnChainBalances(wallet.address, bs.tokens.map(t => t.address));
+    if (onChain) {
+      bs.nativeBalance = Number(onChain.native) / 1e18;
+      for (const t of bs.tokens) {
+        const raw = onChain.tokens.get(t.address) ?? 0n; // multicall omits zero balances
+        t.balance = raw.toString();
+        t.balanceFormatted = Number(raw) / Math.pow(10, t.decimals);
+      }
+    }
     const tokens: WalletPortfolio['tokens'] = [{
       address: 'native',
       symbol: 'ETH',
