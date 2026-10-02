@@ -3,6 +3,7 @@ import db from '../db/client';
 import { getTronTxFees, getEthBlockscoutTxFees } from '../services/explorer';
 import { getNativePrice } from '../services/prices';
 import { getTransactionFees, checkMoralisKeys } from '../services/moralis';
+import { checkNodeReal } from '../services/nodereal';
 import { syncAllWallets, getSyncStatus, NATIVE_COIN_IDS } from '../services/tx-sync';
 
 const router = Router();
@@ -17,8 +18,8 @@ router.post('/sync', (_req: Request, res: Response) => {
 
 // GET /api/transactions/moralis-check — probe each configured Moralis key
 router.get('/moralis-check', async (_req: Request, res: Response) => {
-  const keys = await checkMoralisKeys();
-  res.json({ keysConfigured: keys.length, keys });
+  const [keys, nodereal] = await Promise.all([checkMoralisKeys(), checkNodeReal()]);
+  res.json({ keysConfigured: keys.length, keys, nodereal });
 });
 
 // GET /api/transactions/sync-status

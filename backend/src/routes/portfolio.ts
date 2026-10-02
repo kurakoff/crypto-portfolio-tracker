@@ -10,6 +10,10 @@ import {
   isMoralisChain,
   getWalletTokens,
 } from '../services/moralis';
+import { isNodeRealEnabled, isNodeRealChain } from '../services/nodereal';
+import { getEthereumBlockscoutPortfolio } from '../services/explorer';
+import { saveSnapshot, loadSnapshot } from '../services/snapshots';
+import { refreshNodeRealHoldings } from '../services/tx-sync';
 
 const router = Router();
 
@@ -130,6 +134,27 @@ router.get('/:walletId', async (req: Request, res: Response) => {
 });
 
 async function fetchWalletPortfolio(wallet: Wallet): Promise<WalletPortfolio> {
+  // Ethereum: Blockscout, keyless. Falls back to the last snapshot on error.
+  if (wallet.chain === 'ethereum') {
+    return fetchBlockscoutPortfolio(wallet);
+  }
+
+  // BSC: balances come from the background sync's NodeReal snapshot (refreshed
+  // whenever on-chain activity is detected). Fetch live only if none exists yet.
+  if (isNodeRealEnabled() && isNodeRealChain(wallet.chain)) {
+    const snap = loadSnapshot(wallet.id);
+    if (snap) {
+      snap.portfolio.wallet = wallet;
+      return snap.portfolio;
+    }
+    try {
+      return await refreshNodeRealHoldings(wallet);
+    } catch (err) {
+      console.error(`[nodereal:${wallet.chain}] holdings failed for ${wallet.address.slice(0, 8)}:`, err);
+      return { wallet, nativeBalance: 0, tokens: [], nfts: [], totalValueUsd: 0 };
+    }
+  }
+
   // Use Moralis for supported EVM chains
   if (isMoralisEnabled() && isMoralisChain(wallet.chain)) {
     return fetchMoralisPortfolio(wallet);
@@ -140,37 +165,44 @@ async function fetchWalletPortfolio(wallet: Wallet): Promise<WalletPortfolio> {
 }
 
 /**
- * Save a successful portfolio snapshot to DB for fallback.
+ * Ethereum portfolio via Blockscout (keyless). Snapshot fallback on failure.
  */
-function saveSnapshot(walletId: number, portfolio: WalletPortfolio): void {
+async function fetchBlockscoutPortfolio(wallet: Wallet): Promise<WalletPortfolio> {
   try {
-    db.prepare(
-      `INSERT INTO portfolio_snapshots (wallet_id, data) VALUES (?, ?)`
-    ).run(walletId, JSON.stringify(portfolio));
-    // Keep only the latest 5 snapshots per wallet
-    db.prepare(
-      `DELETE FROM portfolio_snapshots WHERE wallet_id = ? AND id NOT IN (
-        SELECT id FROM portfolio_snapshots WHERE wallet_id = ? ORDER BY created_at DESC LIMIT 5
-      )`
-    ).run(walletId, walletId);
+    const bs = await getEthereumBlockscoutPortfolio(wallet.address);
+    const ethPrice = bs.nativePriceUsd || await getNativePrice('ethereum');
+    const tokens: WalletPortfolio['tokens'] = [{
+      address: 'native',
+      symbol: 'ETH',
+      name: 'Ethereum',
+      decimals: 18,
+      balance: Math.round(bs.nativeBalance * 1e18).toString(),
+      balanceFormatted: bs.nativeBalance,
+      priceUsd: ethPrice,
+      valueUsd: bs.nativeBalance * ethPrice,
+    }];
+    for (const t of bs.tokens) {
+      tokens.push({ ...t, valueUsd: t.balanceFormatted * t.priceUsd });
+    }
+    tokens.sort((a, b) => b.valueUsd - a.valueUsd);
+    const portfolio: WalletPortfolio = {
+      wallet,
+      nativeBalance: bs.nativeBalance,
+      tokens,
+      nfts: [],
+      totalValueUsd: tokens.reduce((s, t) => s + t.valueUsd, 0),
+    };
+    saveSnapshot(wallet.id, portfolio);
+    return portfolio;
   } catch (err) {
-    console.error('[snapshot] save error:', err);
+    console.error(`[blockscout:eth] portfolio failed for ${wallet.address.slice(0, 8)}, using snapshot:`, err);
+    const snap = loadSnapshot(wallet.id);
+    if (snap) {
+      snap.portfolio.wallet = wallet;
+      return snap.portfolio;
+    }
+    return { wallet, nativeBalance: 0, tokens: [], nfts: [], totalValueUsd: 0 };
   }
-}
-
-/**
- * Load the last successful portfolio snapshot from DB.
- */
-function loadSnapshot(walletId: number): WalletPortfolio | null {
-  try {
-    const row = db.prepare(
-      `SELECT data FROM portfolio_snapshots WHERE wallet_id = ? ORDER BY created_at DESC LIMIT 1`
-    ).get(walletId) as { data: string } | undefined;
-    if (row) return JSON.parse(row.data);
-  } catch (err) {
-    console.error('[snapshot] load error:', err);
-  }
-  return null;
 }
 
 /**
@@ -186,8 +218,8 @@ async function fetchMoralisPortfolio(wallet: Wallet): Promise<WalletPortfolio> {
     const snapshot = loadSnapshot(wallet.id);
     if (snapshot) {
       // Update wallet reference in case label changed
-      snapshot.wallet = wallet;
-      return snapshot;
+      snapshot.portfolio.wallet = wallet;
+      return snapshot.portfolio;
     }
     // No snapshot available — return empty
     return { wallet, nativeBalance: 0, tokens: [], nfts: [], totalValueUsd: 0 };

@@ -233,6 +233,52 @@ export async function getEthereumBlockscoutTxs(address: string): Promise<EthBloc
   return out;
 }
 
+/**
+ * Ethereum balances via Blockscout (keyless): native balance + priced tokens.
+ * Tokens without an exchange_rate are address-poisoning fakes and are dropped.
+ */
+export interface BlockscoutPortfolio {
+  nativeBalance: number;
+  nativePriceUsd: number;
+  tokens: Array<{ address: string; symbol: string; name: string; decimals: number; balance: string; balanceFormatted: number; priceUsd: number; logoUri?: string }>;
+}
+
+export async function getEthereumBlockscoutPortfolio(address: string): Promise<BlockscoutPortfolio> {
+  const [addrResp, balResp] = await Promise.all([
+    fetch(`https://eth.blockscout.com/api/v2/addresses/${address}`),
+    fetch(`https://eth.blockscout.com/api/v2/addresses/${address}/token-balances`),
+  ]);
+  if (!addrResp.ok) throw new Error(`blockscout address HTTP ${addrResp.status}`);
+  if (!balResp.ok) throw new Error(`blockscout token-balances HTTP ${balResp.status}`);
+  const addr = (await addrResp.json()) as { coin_balance?: string | null; exchange_rate?: string | null };
+  const bals = (await balResp.json()) as any[];
+
+  const tokens: BlockscoutPortfolio['tokens'] = [];
+  for (const b of Array.isArray(bals) ? bals : []) {
+    const tok = b.token || {};
+    if (tok.type !== 'ERC-20' || tok.exchange_rate == null) continue;
+    const decimals = parseInt(tok.decimals || '18', 10) || 18;
+    const raw = b.value || '0';
+    const formatted = parseFloat(raw) / Math.pow(10, decimals);
+    if (!(formatted > 0)) continue;
+    tokens.push({
+      address: (tok.address_hash || tok.address || '').toLowerCase(),
+      symbol: tok.symbol || '?',
+      name: tok.name || '',
+      decimals,
+      balance: raw,
+      balanceFormatted: formatted,
+      priceUsd: parseFloat(tok.exchange_rate) || 0,
+      logoUri: tok.icon_url || undefined,
+    });
+  }
+  return {
+    nativeBalance: parseFloat(addr.coin_balance || '0') / 1e18,
+    nativePriceUsd: parseFloat(addr.exchange_rate || '0') || 0,
+    tokens,
+  };
+}
+
 /** Per-hash fee lookup on Blockscout (keyless) for txs missing from the address list. */
 export async function getEthBlockscoutTxFees(hashes: string[]): Promise<Map<string, number>> {
   const fees = new Map<string, number>();

@@ -12,7 +12,19 @@ import {
   getEthereumBlockscoutTxs,
   getEthBlockscoutTxFees,
 } from './explorer';
-import { getNativePrice } from './prices';
+import { getNativePrice, getTokenPrices } from './prices';
+import { getDexScreenerPrices } from './dexscreener';
+import {
+  isNodeRealEnabled,
+  isNodeRealChain,
+  detectActivity,
+  getAssetTransfers,
+  getTokenHoldings,
+  secondsPerBlock,
+  type ActivityState,
+} from './nodereal';
+import { saveSnapshot, loadSnapshot } from './snapshots';
+import type { WalletPortfolio } from '../routes/portfolio';
 import {
   isMoralisEnabled,
   isMoralisChain,
@@ -28,7 +40,7 @@ export interface Wallet {
   address: string;
   chain: string;
   label: string | null;
-  last_synced_at: string | null;
+  last_synced_at?: string | null;
 }
 
 /** How often a wallet is re-synced. Moralis chains are slower to keep API credits in check. */
@@ -168,6 +180,8 @@ export async function syncWalletTransactions(wallet: Wallet): Promise<boolean> {
   try {
     if (wallet.chain === 'ethereum') {
       ok = await syncEthereumTransactions(wallet);
+    } else if (isNodeRealEnabled() && isNodeRealChain(wallet.chain)) {
+      ok = await syncNodeRealTransactions(wallet);
     } else if (isMoralisEnabled() && isMoralisChain(wallet.chain)) {
       ok = await syncMoralisTransactions(wallet);
     } else {
@@ -301,6 +315,183 @@ async function syncEthereumTransactions(wallet: Wallet): Promise<boolean> {
   console.log(`[blockscout:eth] Syncing ${records.length} txs for ${wallet.address.slice(0, 8)}...`);
   insertTransactions(wallet.id, records);
   repairMissingFeeUsd(wallet.id, ethPrice);
+  return true;
+}
+
+// ---- NodeReal (BSC) ----
+
+const COINGECKO_PLATFORMS: Record<string, string> = { ethereum: 'ethereum', bsc: 'binance-smart-chain' };
+/** Real stablecoin contracts: always priced at $1 even if the price APIs are down. */
+const STABLE_CONTRACTS: Record<string, Set<string>> = {
+  bsc: new Set([
+    '0x55d398326f99059ff775485246999027b3197955', // USDT
+    '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d', // USDC
+    '0xe9e7cea3dedca5984780bafc599bd69add087d56', // BUSD
+    '0xc5f0f7b66764f6ec8c8dff7ba683102295e16409', // FDUSD
+    '0x1af3f329e8be154074d8769d1ffa4ee058b1dbc3', // DAI
+    '0x14016e85a25aeb13065688cafb43044c2ef86784', // TUSD
+  ]),
+  ethereum: new Set([
+    '0xdac17f958d2ee523a2206206994597c13d831ec7', // USDT
+    '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', // USDC
+    '0x6b175474e89094c44da98b954eedeac495271d0f', // DAI
+  ]),
+};
+
+const activityState = new Map<number, ActivityState>();
+const holdingsRefreshedAt = new Map<number, number>();
+const HOLDINGS_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+
+/** Prices for a set of token contracts: stable list → CoinGecko → DexScreener. */
+async function getTokenPriceMap(chain: string, addresses: string[]): Promise<Record<string, number>> {
+  const prices: Record<string, number> = {};
+  const stables = STABLE_CONTRACTS[chain] || new Set<string>();
+  const unknown: string[] = [];
+  for (const a of addresses) {
+    if (stables.has(a)) prices[a] = 1;
+    else unknown.push(a);
+  }
+  if (unknown.length > 0) {
+    const platform = COINGECKO_PLATFORMS[chain];
+    const cg = platform ? await getTokenPrices(platform, unknown) : {};
+    const still: string[] = [];
+    for (const a of unknown) {
+      if (cg[a] > 0) prices[a] = cg[a];
+      else still.push(a);
+    }
+    if (still.length > 0) {
+      const dex = await getDexScreenerPrices(chain, still);
+      for (const a of still) if (dex[a] > 0) prices[a] = dex[a];
+    }
+  }
+  return prices;
+}
+
+/**
+ * Refresh a wallet's balances via NodeReal and store them as the portfolio
+ * snapshot the portfolio route serves. Called only when activity was detected
+ * or the snapshot is older than HOLDINGS_MAX_AGE_MS (300 CU per call).
+ */
+export async function refreshNodeRealHoldings(wallet: Wallet, nativePrice?: number): Promise<WalletPortfolio> {
+  const holdings = await getTokenHoldings(wallet.chain, wallet.address);
+  const price = nativePrice ?? await getNativePrice(NATIVE_COIN_IDS[wallet.chain]);
+  const prices = await getTokenPriceMap(wallet.chain, holdings.tokens.map(t => t.address));
+  const nativeSymbol = NATIVE_SYMBOLS[wallet.chain] || '?';
+
+  const tokens: WalletPortfolio['tokens'] = [{
+    address: 'native',
+    symbol: nativeSymbol,
+    name: nativeSymbol,
+    decimals: 18,
+    balance: (BigInt(Math.round(holdings.nativeBalance * 1e6)) * 10n ** 12n).toString(),
+    balanceFormatted: holdings.nativeBalance,
+    priceUsd: price,
+    valueUsd: holdings.nativeBalance * price,
+  }];
+  for (const t of holdings.tokens) {
+    const p = prices[t.address] || 0;
+    tokens.push({
+      address: t.address,
+      symbol: t.symbol,
+      name: t.name,
+      decimals: t.decimals,
+      balance: t.balanceRaw,
+      balanceFormatted: t.balance,
+      priceUsd: p,
+      valueUsd: t.balance * p,
+    });
+  }
+  // Priced tokens first, unpriced (mostly spam airdrops) last.
+  tokens.sort((a, b) => (b.valueUsd - a.valueUsd) || (b.priceUsd > 0 ? 1 : 0) - (a.priceUsd > 0 ? 1 : 0));
+
+  const portfolio: WalletPortfolio = {
+    wallet: { id: wallet.id, address: wallet.address, chain: wallet.chain, label: wallet.label },
+    nativeBalance: holdings.nativeBalance,
+    tokens,
+    nfts: [],
+    totalValueUsd: tokens.reduce((s, t) => s + t.valueUsd, 0),
+  };
+  saveSnapshot(wallet.id, portfolio);
+  holdingsRefreshedAt.set(wallet.id, Date.now());
+  console.log(`[nodereal:${wallet.chain}] ${wallet.address.slice(0, 8)}... balances: ${tokens.length} tokens, $${portfolio.totalValueUsd.toFixed(2)}`);
+  return portfolio;
+}
+
+async function syncNodeRealTransactions(wallet: Wallet): Promise<boolean> {
+  const prev = activityState.get(wallet.id);
+  const { changed, state } = await detectActivity(wallet.chain, wallet.address, prev);
+  activityState.set(wallet.id, state);
+
+  const snapshotAge = (() => {
+    const at = holdingsRefreshedAt.get(wallet.id);
+    if (at) return Date.now() - at;
+    const snap = loadSnapshot(wallet.id);
+    return snap ? Date.now() - new Date(snap.createdAt + 'Z').getTime() : Infinity;
+  })();
+  const firstRun = !prev;
+
+  if (!changed && !firstRun) {
+    if (snapshotAge > HOLDINGS_MAX_AGE_MS) await refreshNodeRealHoldings(wallet);
+    return true; // nothing new on chain; no expensive calls spent
+  }
+
+  // Something happened: pull transfers since the last checked block (with a
+  // little overlap). First run after boot: back to the newest tx we already
+  // have (minus a day), or 60 days if the wallet has none.
+  const head = state.lastBlock;
+  let fromBlock: number;
+  if (prev) {
+    fromBlock = prev.lastBlock - 200;
+  } else {
+    const latest = db.prepare(
+      'SELECT MAX(timestamp) AS ts FROM transactions WHERE wallet_id = ?'
+    ).get(wallet.id) as { ts: string | null };
+    const sinceMs = latest.ts
+      ? new Date(latest.ts).getTime() - 24 * 60 * 60 * 1000
+      : Date.now() - 60 * 24 * 60 * 60 * 1000;
+    const spb = await secondsPerBlock(wallet.chain, head);
+    const ageSec = Math.max(0, (Date.now() - sinceMs) / 1000);
+    fromBlock = Math.max(0, head - Math.ceil(ageSec / spb));
+  }
+  const transfers = await getAssetTransfers(wallet.chain, wallet.address, fromBlock, head);
+
+  const nativePrice = await getNativePrice(NATIVE_COIN_IDS[wallet.chain]);
+  const contracts = [...new Set(transfers.filter(t => t.contractAddress !== 'native').map(t => t.contractAddress))];
+  const prices = await getTokenPriceMap(wallet.chain, contracts);
+  const addr = wallet.address.toLowerCase();
+  const nativeSymbol = NATIVE_SYMBOLS[wallet.chain] || '?';
+
+  const records: TxRecord[] = [];
+  let dropped = 0, dust = 0;
+  for (const t of transfers) {
+    if (!(t.amount > 0)) continue;
+    const isNative = t.contractAddress === 'native';
+    const price = isNative ? nativePrice : (prices[t.contractAddress] || 0);
+    if (!isNative && !(price > 0)) { dropped++; continue; } // unpriced token => airdrop spam / poisoning fake
+    if (price > 0 && t.amount * price < 0.01) { dust++; continue; } // dust transfers from address poisoners
+    const isSend = t.from === addr;
+    const feeNative = isSend ? t.feeNative : 0;
+    records.push({
+      hash: t.hash,
+      blockNumber: t.blockNumber,
+      timestamp: t.timestamp,
+      from: t.from,
+      to: t.to,
+      value: String(t.amount),
+      tokenSymbol: isNative ? nativeSymbol : t.symbol,
+      tokenAddress: t.contractAddress,
+      type: isSend ? 'send' : 'receive',
+      valueUsd: t.amount * price,
+      feeNative,
+      feeUsd: feeNative * nativePrice,
+    });
+  }
+
+  console.log(`[nodereal:${wallet.chain}] ${wallet.address.slice(0, 8)}... ${records.length} txs (dropped ${dropped} unpriced, ${dust} dust)`);
+  if (records.length > 0) insertTransactions(wallet.id, records);
+  repairMissingFeeUsd(wallet.id, nativePrice);
+
+  await refreshNodeRealHoldings(wallet, nativePrice);
   return true;
 }
 
