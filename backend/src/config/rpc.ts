@@ -55,6 +55,7 @@ export const config = {
   bscRpcUrl: process.env.BSC_RPC_URL || 'https://bsc-dataseed1.binance.org',
   arbRpcUrl: process.env.ARB_RPC_URL || 'https://arb1.arbitrum.io/rpc',
   tronApiUrl: process.env.TRON_API_URL || 'https://api.trongrid.io',
+  tronApiKey: process.env.TRON_API_KEY || '',
   solRpcUrl: process.env.SOL_RPC_URL || 'https://api.mainnet-beta.solana.com',
   coingeckoBaseUrl: process.env.COINGECKO_BASE_URL || 'https://api.coingecko.com/api/v3',
   googleServiceAccountEmail: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '',

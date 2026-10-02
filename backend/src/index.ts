@@ -7,6 +7,7 @@ import walletsRouter from './routes/wallets';
 import portfolioRouter from './routes/portfolio';
 import exportRouter from './routes/export';
 import transactionsRouter from './routes/transactions';
+import { startBackgroundSync } from './services/tx-sync';
 
 const app = express();
 
@@ -31,4 +32,5 @@ app.use('/api/transactions', authMiddleware, transactionsRouter);
 
 app.listen(config.port, () => {
   console.log(`Backend running on http://localhost:${config.port}`);
+  startBackgroundSync();
 });

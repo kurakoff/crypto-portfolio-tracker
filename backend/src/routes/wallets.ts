@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import db from '../db/client';
+import { syncWalletTransactions, type Wallet } from '../services/tx-sync';
 import { cache } from '../cache/memory-cache';
 
 const router = Router();
@@ -35,6 +36,8 @@ router.post('/', (req: Request, res: Response) => {
 
     const wallet = db.prepare('SELECT * FROM wallets WHERE id = ?').get(result.lastInsertRowid);
     invalidatePortfolioCache();
+    // Pull its transactions right away instead of waiting for the next sync tick.
+    void syncWalletTransactions(wallet as Wallet);
     res.status(201).json(wallet);
   } catch (err: any) {
     if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {

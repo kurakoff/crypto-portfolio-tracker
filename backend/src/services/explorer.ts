@@ -1,4 +1,10 @@
 import { cache } from '../cache/memory-cache';
+import { config } from '../config/rpc';
+
+/** TronGrid headers: free API key lifts the strict anonymous rate limit. */
+function tronHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  return config.tronApiKey ? { ...extra, 'TRON-PRO-API-KEY': config.tronApiKey } : extra;
+}
 
 export interface ExplorerTx {
   hash: string;
@@ -264,9 +270,9 @@ export async function getTronTxFees(hashes: string[]): Promise<Map<string, numbe
     const results = await Promise.all(
       batch.map(async (hash) => {
         try {
-          const resp = await fetch('https://api.trongrid.io/wallet/gettransactioninfobyid', {
+          const resp = await fetch(`${config.tronApiUrl}/wallet/gettransactioninfobyid`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: tronHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ value: hash }),
           });
           const data = await resp.json() as any;
@@ -289,61 +295,75 @@ export async function getTronTxFees(hashes: string[]): Promise<Map<string, numbe
 
 // ---- Tron via TronGrid ----
 
-export async function getTronTransactions(address: string): Promise<ExplorerTx[]> {
+/** TronGrid list call. Returns null on HTTP error / rate limit so callers can
+ *  tell "failed" apart from "no transactions". */
+async function tronGridList(url: string, what: string): Promise<any[] | null> {
+  try {
+    const resp = await fetch(url, { headers: tronHeaders() });
+    if (!resp.ok) {
+      console.error(`[trongrid] ${what} HTTP ${resp.status}`);
+      return null;
+    }
+    const data = (await resp.json()) as { success?: boolean; error?: string; data?: any[] };
+    if (data.success === false || data.error) {
+      console.error(`[trongrid] ${what} error: ${data.error || 'success=false'}`);
+      return null;
+    }
+    return data.data || [];
+  } catch (err) {
+    console.error(`[trongrid] ${what} failed:`, err);
+    return null;
+  }
+}
+
+/** Returns null when TronGrid could not be read (nothing is cached then). */
+export async function getTronTransactions(address: string): Promise<ExplorerTx[] | null> {
   const cacheKey = `explorer:tron:${address}`;
   const cached = cache.get<ExplorerTx[]>(cacheKey);
   if (cached) return cached;
 
+  const [native, trc20] = await Promise.all([
+    tronGridList(`${config.tronApiUrl}/v1/accounts/${address}/transactions?limit=50`, `native ${address.slice(0, 8)}`),
+    tronGridList(`${config.tronApiUrl}/v1/accounts/${address}/transactions/trc20?limit=50`, `trc20 ${address.slice(0, 8)}`),
+  ]);
+  if (native === null || trc20 === null) return null;
+
   const txs: ExplorerTx[] = [];
 
-  try {
-    const resp = await fetch(`https://api.trongrid.io/v1/accounts/${address}/transactions?limit=50`);
-    const data = (await resp.json()) as { data?: any[] };
+  for (const tx of native) {
+    const contract = tx.raw_data?.contract?.[0];
+    if (!contract) continue;
+    const param = contract.parameter?.value;
+    if (!param || contract.type !== 'TransferContract') continue;
 
-    for (const tx of data.data || []) {
-      const contract = tx.raw_data?.contract?.[0];
-      if (!contract) continue;
-      const param = contract.parameter?.value;
-      if (!param || contract.type !== 'TransferContract') continue;
-
-      txs.push({
-        hash: tx.txID,
-        blockNumber: tx.blockNumber || 0,
-        timestamp: new Date(tx.block_timestamp || tx.raw_data?.timestamp || 0).toISOString(),
-        from: param.owner_address || '',
-        to: param.to_address || '',
-        value: ((param.amount || 0) / 1_000_000).toString(),
-        tokenSymbol: 'TRX',
-        tokenAddress: 'native',
-        type: (param.owner_address || '').toLowerCase() === address.toLowerCase() ? 'send' : 'receive',
-      });
-    }
-  } catch (err) {
-    console.error('Tron native tx failed:', err);
+    txs.push({
+      hash: tx.txID,
+      blockNumber: tx.blockNumber || 0,
+      timestamp: new Date(tx.block_timestamp || tx.raw_data?.timestamp || 0).toISOString(),
+      from: param.owner_address || '',
+      to: param.to_address || '',
+      value: ((param.amount || 0) / 1_000_000).toString(),
+      tokenSymbol: 'TRX',
+      tokenAddress: 'native',
+      type: (param.owner_address || '').toLowerCase() === address.toLowerCase() ? 'send' : 'receive',
+    });
   }
 
-  try {
-    const resp = await fetch(`https://api.trongrid.io/v1/accounts/${address}/transactions/trc20?limit=50`);
-    const data = (await resp.json()) as { data?: any[] };
+  for (const tx of trc20) {
+    // Skip non-transfer events (approve, etc.)
+    if (tx.type && tx.type !== 'Transfer') continue;
 
-    for (const tx of data.data || []) {
-      // Skip non-transfer events (approve, etc.)
-      if (tx.type && tx.type !== 'Transfer') continue;
-
-      txs.push({
-        hash: tx.transaction_id,
-        blockNumber: 0,
-        timestamp: new Date(tx.block_timestamp || 0).toISOString(),
-        from: tx.from || '',
-        to: tx.to || '',
-        value: tx.value ? formatTokenValue(tx.value, tx.token_info?.decimals || 6) : '0',
-        tokenSymbol: tx.token_info?.symbol || 'UNKNOWN',
-        tokenAddress: tx.token_info?.address || '',
-        type: (tx.from || '').toLowerCase() === address.toLowerCase() ? 'send' : 'receive',
-      });
-    }
-  } catch (err) {
-    console.error('Tron TRC-20 tx failed:', err);
+    txs.push({
+      hash: tx.transaction_id,
+      blockNumber: 0,
+      timestamp: new Date(tx.block_timestamp || 0).toISOString(),
+      from: tx.from || '',
+      to: tx.to || '',
+      value: tx.value ? formatTokenValue(tx.value, tx.token_info?.decimals || 6) : '0',
+      tokenSymbol: tx.token_info?.symbol || 'UNKNOWN',
+      tokenAddress: tx.token_info?.address || '',
+      type: (tx.from || '').toLowerCase() === address.toLowerCase() ? 'send' : 'receive',
+    });
   }
 
   cache.set(cacheKey, txs, 60_000);
@@ -354,7 +374,7 @@ export async function getTronTransactions(address: string): Promise<ExplorerTx[]
 
 export async function getNativeTransactions(chain: string, address: string): Promise<ExplorerTx[]> {
   if (chain === 'ethereum') return blockscoutNativeTransfers(address);
-  if (chain === 'tron') return getTronTransactions(address);
+  if (chain === 'tron') return (await getTronTransactions(address)) || [];
   // BSC native TXs: not available via free API
   return [];
 }

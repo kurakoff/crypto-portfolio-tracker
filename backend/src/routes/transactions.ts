@@ -1,44 +1,24 @@
 import { Router, Request, Response } from 'express';
 import db from '../db/client';
-import { getNativeTransactions, getTokenTransactions, getTronTransactions, getTronTxFees, getEthereumBlockscoutTxs, getEthBlockscoutTxFees } from '../services/explorer';
+import { getTronTxFees, getEthBlockscoutTxFees } from '../services/explorer';
 import { getNativePrice } from '../services/prices';
-import {
-  isMoralisEnabled,
-  isMoralisChain,
-  getTokenTransfers,
-  getNativeTransfers,
-  getWalletTokens,
-  getTransactionFees,
-  getWalletHistory,
-} from '../services/moralis';
+import { getTransactionFees } from '../services/moralis';
+import { syncAllWallets, getSyncStatus, NATIVE_COIN_IDS } from '../services/tx-sync';
 
 const router = Router();
 
-interface Wallet {
-  id: number;
-  address: string;
-  chain: string;
-  label: string | null;
-  last_synced_at: string | null;
-}
+// POST /api/transactions/sync — force a sync of all wallets now (background).
+// Returns immediately; poll GET /sync-status until running=false, then refetch.
+router.post('/sync', (_req: Request, res: Response) => {
+  const before = getSyncStatus();
+  void syncAllWallets(true);
+  res.status(202).json({ started: !before.running, ...getSyncStatus() });
+});
 
-const SYNC_THROTTLE_MS = 5 * 60 * 1000; // 5 minutes
-
-const NATIVE_SYMBOLS: Record<string, string> = {
-  ethereum: 'ETH',
-  bsc: 'BNB',
-  arbitrum: 'ETH',
-  tron: 'TRX',
-  solana: 'SOL',
-};
-
-const NATIVE_COIN_IDS: Record<string, string> = {
-  ethereum: 'ethereum',
-  bsc: 'binancecoin',
-  arbitrum: 'ethereum',
-  tron: 'tron',
-  solana: 'solana',
-};
+// GET /api/transactions/sync-status
+router.get('/sync-status', (_req: Request, res: Response) => {
+  res.json(getSyncStatus());
+});
 
 // GET /api/transactions/address-labels — all address labels
 router.get('/address-labels', (_req: Request, res: Response) => {
@@ -147,12 +127,7 @@ router.post('/backfill-fees', async (_req: Request, res: Response) => {
 // GET /api/transactions — all transactions across wallets
 router.get('/', async (_req: Request, res: Response) => {
   try {
-    const wallets = db.prepare('SELECT * FROM wallets').all() as Wallet[];
-
-    for (const wallet of wallets) {
-      await syncWalletTransactions(wallet);
-    }
-
+    // Sync runs in the background (services/tx-sync); this only reads the DB.
     const transactions = db.prepare(`
       SELECT t.*, w.address as wallet_address, w.chain, w.label as wallet_label
       FROM transactions t
@@ -186,13 +161,11 @@ router.patch('/:id/comment', (req: Request, res: Response) => {
 // GET /api/transactions/:walletId
 router.get('/:walletId', async (req: Request, res: Response) => {
   try {
-    const wallet = db.prepare('SELECT * FROM wallets WHERE id = ?').get(req.params.walletId) as Wallet | undefined;
+    const wallet = db.prepare('SELECT * FROM wallets WHERE id = ?').get(req.params.walletId) as { id: number } | undefined;
     if (!wallet) {
       res.status(404).json({ error: 'Wallet not found' });
       return;
     }
-
-    await syncWalletTransactions(wallet);
 
     const transactions = db.prepare(`
       SELECT t.*, w.address as wallet_address, w.chain, w.label as wallet_label
@@ -209,380 +182,5 @@ router.get('/:walletId', async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Failed to fetch transactions', details: err.message });
   }
 });
-
-interface TxRecord {
-  hash: string;
-  blockNumber: number;
-  timestamp: string;
-  from: string;
-  to: string;
-  value: string;
-  tokenSymbol: string;
-  tokenAddress: string;
-  type: string;
-  valueUsd: number;
-  feeNative: number;
-  feeUsd: number;
-}
-
-/** Return set of tx hashes that already have fee_native > 0 in DB for this wallet */
-function getExistingFeeHashes(walletId: number): Set<string> {
-  const rows = db.prepare(
-    'SELECT hash FROM transactions WHERE wallet_id = ? AND fee_native > 0'
-  ).all(walletId) as { hash: string }[];
-  return new Set(rows.map(r => r.hash));
-}
-
-/**
- * Rows that got fee_native but fee_usd = 0 (price lookup failed during that
- * sync) are never re-fetched, so fill in the USD value from the current price.
- */
-function repairMissingFeeUsd(walletId: number, nativePrice: number): void {
-  if (!(nativePrice > 0)) return;
-  const r = db.prepare(
-    'UPDATE transactions SET fee_usd = fee_native * ? WHERE wallet_id = ? AND fee_native > 0 AND fee_usd = 0'
-  ).run(nativePrice, walletId);
-  if (r.changes > 0) console.log(`[fees] Filled fee_usd for ${r.changes} tx(s) of wallet ${walletId}`);
-}
-
-async function syncWalletTransactions(wallet: Wallet): Promise<void> {
-  // Throttle: skip sync if last synced < 5 minutes ago
-  if (wallet.last_synced_at) {
-    const elapsed = Date.now() - new Date(wallet.last_synced_at).getTime();
-    if (elapsed < SYNC_THROTTLE_MS) return;
-  }
-
-  if (wallet.chain === 'ethereum') {
-    // Ethereum: Blockscout is a far more reliable source than Moralis's flaky
-    // /erc20/transfers, and it lets us drop address-poisoning fakes cleanly.
-    await syncEthereumTransactions(wallet);
-  } else if (isMoralisEnabled() && isMoralisChain(wallet.chain)) {
-    await syncMoralisTransactions(wallet);
-  } else {
-    await syncLegacyTransactions(wallet);
-  }
-
-  // Update last_synced_at
-  db.prepare('UPDATE wallets SET last_synced_at = datetime(\'now\') WHERE id = ?').run(wallet.id);
-}
-
-/**
- * Build a price map from Moralis wallet tokens (current prices).
- * Returns { tokenAddress -> usdPrice, 'native' -> nativePrice }
- */
-async function getMoralisPrices(
-  chain: string,
-  address: string
-): Promise<Record<string, number>> {
-  const prices: Record<string, number> = {};
-
-  // Get token prices from Moralis portfolio (already cached)
-  const tokens = await getWalletTokens(chain, address);
-  for (const t of tokens) {
-    if (t.native_token) {
-      prices['native'] = t.usd_price || 0;
-    } else if (t.usd_price) {
-      prices[t.token_address.toLowerCase()] = t.usd_price;
-    }
-  }
-
-  // Fallback native price from CoinGecko if not in Moralis
-  if (!prices['native']) {
-    const coinId = NATIVE_COIN_IDS[chain];
-    if (coinId) {
-      prices['native'] = await getNativePrice(coinId);
-    }
-  }
-
-  return prices;
-}
-
-async function syncEthereumTransactions(wallet: Wallet): Promise<void> {
-  const txs = await getEthereumBlockscoutTxs(wallet.address);
-
-  // If Blockscout returned nothing, fall back to Moralis so we never regress.
-  if (txs.length === 0) {
-    await syncMoralisTransactions(wallet);
-    return;
-  }
-
-  const ethPrice = await getNativePrice('ethereum');
-
-  // Native USD needs the ETH price (token USD already set from exchange_rate).
-  for (const t of txs) {
-    if (t.tokenAddress === 'native') t.valueUsd = parseFloat(t.value) * ethPrice;
-  }
-
-  // Fees for token sends: most come with the Blockscout address tx list already
-  // (t.feeNative). For the rest (older than the first page) look them up per
-  // hash on Blockscout, then Moralis as a last resort. Only for new hashes.
-  const knownFees = getExistingFeeHashes(wallet.id);
-  const missing = txs
-    .filter(t => t.type === 'send' && t.tokenAddress !== 'native' && !t.feeNative && !knownFees.has(t.hash))
-    .map(t => t.hash);
-  const feeMap = missing.length > 0
-    ? await getEthBlockscoutTxFees(missing)
-    : new Map<string, number>();
-  const stillMissing = missing.filter(h => !feeMap.has(h));
-  if (stillMissing.length > 0) {
-    for (const [h, fee] of await getTransactionFees('ethereum', stillMissing)) {
-      if (fee > 0) feeMap.set(h, fee);
-    }
-  }
-
-  const records: TxRecord[] = txs.map(t => {
-    const feeNative = t.feeNative || feeMap.get(t.hash) || 0;
-    return {
-      hash: t.hash,
-      blockNumber: t.blockNumber,
-      timestamp: t.timestamp,
-      from: t.from,
-      to: t.to,
-      value: t.value,
-      tokenSymbol: t.tokenSymbol,
-      tokenAddress: t.tokenAddress,
-      type: t.type,
-      valueUsd: t.valueUsd,
-      feeNative,
-      feeUsd: feeNative * ethPrice,
-    };
-  });
-
-  console.log(`[blockscout:eth] Syncing ${records.length} txs for ${wallet.address.slice(0, 8)}...`);
-  insertTransactions(wallet.id, records);
-  repairMissingFeeUsd(wallet.id, ethPrice);
-}
-
-async function syncMoralisTransactions(wallet: Wallet): Promise<void> {
-  const [tokenTxs, nativeTxs, prices] = await Promise.all([
-    getTokenTransfers(wallet.chain, wallet.address),
-    getNativeTransfers(wallet.chain, wallet.address),
-    getMoralisPrices(wallet.chain, wallet.address),
-  ]);
-
-  const nativePrice = prices['native'] || 0;
-  const nativeSymbol = NATIVE_SYMBOLS[wallet.chain] || '?';
-  const knownFees = getExistingFeeHashes(wallet.id);
-
-  // Collect send token tx hashes for fee lookup (skip already known)
-  const sendTokenHashes = tokenTxs
-    .filter(tx => tx.to_address.toLowerCase() !== wallet.address.toLowerCase())
-    .map(tx => tx.transaction_hash)
-    .filter(h => !knownFees.has(h));
-
-  // Fetch fees only for new send token txs
-  const tokenFeeMap = sendTokenHashes.length > 0
-    ? await getTransactionFees(wallet.chain, sendTokenHashes)
-    : new Map<string, number>();
-
-  const allTxs: TxRecord[] = [];
-
-  // Token transfers
-  for (const tx of tokenTxs) {
-    const isReceive = tx.to_address.toLowerCase() === wallet.address.toLowerCase();
-    const valueDecimal = tx.value_decimal || '0';
-    const amount = parseFloat(valueDecimal) || 0;
-    const price = prices[tx.address.toLowerCase()] || 0;
-    const feeNative = isReceive ? 0 : (tokenFeeMap.get(tx.transaction_hash) || 0);
-
-    allTxs.push({
-      hash: tx.transaction_hash,
-      blockNumber: parseInt(tx.block_number) || 0,
-      timestamp: tx.block_timestamp || '',
-      from: tx.from_address,
-      to: tx.to_address,
-      value: valueDecimal,
-      tokenSymbol: tx.token_symbol || '?',
-      tokenAddress: tx.address,
-      type: isReceive ? 'receive' : 'send',
-      valueUsd: amount * price,
-      feeNative,
-      feeUsd: feeNative * nativePrice,
-    });
-  }
-
-  // Native transfers — transaction_fee already in response
-  for (const tx of nativeTxs) {
-    if (tx.value === '0') continue;
-    const isReceive = tx.to_address.toLowerCase() === wallet.address.toLowerCase();
-    const valueFormatted = parseFloat(tx.value) / 1e18;
-    const feeNative = isReceive ? 0 : parseFloat(tx.transaction_fee || '0');
-
-    allTxs.push({
-      hash: tx.hash,
-      blockNumber: parseInt(tx.block_number) || 0,
-      timestamp: tx.block_timestamp || '',
-      from: tx.from_address,
-      to: tx.to_address,
-      value: valueFormatted.toString(),
-      tokenSymbol: nativeSymbol,
-      tokenAddress: 'native',
-      type: isReceive ? 'receive' : 'send',
-      valueUsd: valueFormatted * nativePrice,
-      feeNative,
-      feeUsd: feeNative * nativePrice,
-    });
-  }
-
-  // Fallback: the legacy /erc20/transfers + native endpoints return nothing for
-  // some wallets/chains (e.g. Arbitrum) even when transfers exist. Only when we
-  // got zero txs above, pull them from the unified /history endpoint. Existing
-  // wallets that already produce txs are never touched by this.
-  if (allTxs.length === 0) {
-    const addr = wallet.address.toLowerCase();
-    const STABLES = new Set(['USDT', 'USDC', 'BUSD', 'TUSD', 'DAI', 'USDJ', 'FDUSD', 'PYUSD']);
-    const history = await getWalletHistory(wallet.chain, wallet.address);
-
-    for (const item of history) {
-      const fee = parseFloat(item.transaction_fee || '0');
-      const blockNumber = parseInt(item.block_number) || 0;
-      const ts = item.block_timestamp || '';
-
-      for (const t of item.erc20_transfers || []) {
-        if (t.possible_spam) continue;
-        const isReceive = t.direction === 'receive' || (t.to_address || '').toLowerCase() === addr;
-        const amount = parseFloat(t.value_formatted || '0');
-        const tokenAddr = (t.address || '').toLowerCase();
-        const price = prices[tokenAddr] || (STABLES.has((t.token_symbol || '').toUpperCase()) ? 1 : 0);
-        const feeNative = isReceive ? 0 : fee;
-
-        allTxs.push({
-          hash: item.hash,
-          blockNumber,
-          timestamp: ts,
-          from: t.from_address,
-          to: t.to_address,
-          value: t.value_formatted || '0',
-          tokenSymbol: t.token_symbol || '?',
-          tokenAddress: t.address || '',
-          type: isReceive ? 'receive' : 'send',
-          valueUsd: amount * price,
-          feeNative,
-          feeUsd: feeNative * nativePrice,
-        });
-      }
-
-      for (const t of item.native_transfers || []) {
-        const amount = parseFloat(t.value_formatted || '0');
-        if (amount === 0) continue;
-        const isReceive = t.direction === 'receive' || (t.to_address || '').toLowerCase() === addr;
-        const feeNative = isReceive ? 0 : fee;
-
-        allTxs.push({
-          hash: item.hash,
-          blockNumber,
-          timestamp: ts,
-          from: t.from_address,
-          to: t.to_address,
-          value: t.value_formatted || '0',
-          tokenSymbol: nativeSymbol,
-          tokenAddress: 'native',
-          type: isReceive ? 'receive' : 'send',
-          valueUsd: amount * nativePrice,
-          feeNative,
-          feeUsd: feeNative * nativePrice,
-        });
-      }
-    }
-  }
-
-  repairMissingFeeUsd(wallet.id, nativePrice);
-  if (allTxs.length === 0) return;
-
-  console.log(`[moralis:${wallet.chain}] Syncing ${allTxs.length} txs for ${wallet.address.slice(0, 8)}...`);
-  insertTransactions(wallet.id, allTxs);
-}
-
-async function syncLegacyTransactions(wallet: Wallet): Promise<void> {
-  let allExplorerTxs: import('../services/explorer').ExplorerTx[] = [];
-
-  if (wallet.chain === 'ethereum' || wallet.chain === 'bsc' || wallet.chain === 'arbitrum') {
-    const [native, tokens] = await Promise.all([
-      getNativeTransactions(wallet.chain, wallet.address),
-      getTokenTransactions(wallet.chain, wallet.address),
-    ]);
-    allExplorerTxs = [...native, ...tokens];
-  } else if (wallet.chain === 'tron') {
-    allExplorerTxs = await getTronTransactions(wallet.address);
-  }
-
-  // Get native price for fee USD calculation (TRON)
-  let nativePrice = 0;
-  if (wallet.chain === 'tron') {
-    const coinId = NATIVE_COIN_IDS[wallet.chain];
-    if (coinId) nativePrice = await getNativePrice(coinId);
-    repairMissingFeeUsd(wallet.id, nativePrice);
-  }
-
-  if (allExplorerTxs.length === 0) return;
-
-  if (wallet.chain === 'tron') {
-
-    // Fetch TRON fees only for send txs not already in DB
-    const knownFees = getExistingFeeHashes(wallet.id);
-    const newSendHashes = allExplorerTxs
-      .filter(tx => tx.type === 'send' && !knownFees.has(tx.hash))
-      .map(tx => tx.hash);
-
-    if (newSendHashes.length > 0) {
-      const feeMap = await getTronTxFees(newSendHashes);
-      for (const tx of allExplorerTxs) {
-        if (tx.type === 'send' && feeMap.has(tx.hash)) {
-          tx.feeNative = feeMap.get(tx.hash);
-        }
-      }
-    }
-  }
-
-  // Estimate USD for stablecoins ($1 per token)
-  const STABLECOIN_RE = /^(usdt|usdc|busd|tusd|dai|fdusd|pyusd)$/i;
-  const records: TxRecord[] = allExplorerTxs.map(tx => {
-    const feeNative = tx.feeNative || 0;
-    return {
-      ...tx,
-      valueUsd: STABLECOIN_RE.test(tx.tokenSymbol)
-        ? parseFloat(tx.value || '0')
-        : 0,
-      feeNative,
-      feeUsd: feeNative * nativePrice,
-    };
-  });
-
-  insertTransactions(wallet.id, records);
-}
-
-function insertTransactions(walletId: number, txs: TxRecord[]): void {
-  const insert = db.prepare(`
-    INSERT INTO transactions
-      (wallet_id, hash, block_number, timestamp, from_address, to_address, value, token_symbol, token_address, type, value_usd, fee_native, fee_usd)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(wallet_id, hash, token_address) DO UPDATE SET
-      value_usd = CASE WHEN excluded.value_usd > 0 AND transactions.value_usd = 0 THEN excluded.value_usd ELSE transactions.value_usd END,
-      fee_native = CASE WHEN excluded.fee_native > 0 AND transactions.fee_native = 0 THEN excluded.fee_native ELSE transactions.fee_native END,
-      fee_usd = CASE WHEN excluded.fee_usd > 0 AND transactions.fee_usd = 0 THEN excluded.fee_usd ELSE transactions.fee_usd END
-  `);
-
-  const batchInsert = db.transaction((records: TxRecord[]) => {
-    for (const tx of records) {
-      insert.run(
-        walletId,
-        tx.hash,
-        tx.blockNumber,
-        tx.timestamp,
-        tx.from,
-        tx.to,
-        tx.value,
-        tx.tokenSymbol,
-        tx.tokenAddress,
-        tx.type,
-        tx.valueUsd,
-        tx.feeNative,
-        tx.feeUsd,
-      );
-    }
-  });
-
-  batchInsert(txs);
-}
 
 export default router;

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { usePortfolio } from '../hooks/usePortfolio';
 import { useTransactions, useAddressLabels } from '../hooks/useTransactions';
+import SyncButton from '../components/SyncButton';
 import { useDateRange } from '../context/DateRangeContext';
 import { useDisabledWallets } from '../context/DisabledWalletsContext';
 import TransactionTable from '../components/TransactionTable';
@@ -215,6 +216,7 @@ export default function Dashboard() {
             ))}
           </select>
           <DateRangeFilter value={dateRange} onChange={setDateRange} />
+          <SyncButton />
           <ExportButton exportData={exportData} />
         </div>
       </div>

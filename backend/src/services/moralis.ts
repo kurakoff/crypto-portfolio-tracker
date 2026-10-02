@@ -184,7 +184,7 @@ export async function getTokenTransfers(
   chain: string,
   address: string,
   limit = 100
-): Promise<MoralisTransfer[]> {
+): Promise<MoralisTransfer[] | null> {
   const mc = moralisChain(chain);
   if (!mc || !apiKey()) return [];
 
@@ -197,18 +197,16 @@ export async function getTokenTransfers(
       `${BASE}/${address}/erc20/transfers?chain=${mc}&limit=${limit}`
     );
     if (!resp.ok) {
-      console.error(`[moralis] transfers ${resp.status}`);
-      cache.set(cacheKey, [], 60_000);
-      return [];
+      console.error(`[moralis] ${cacheKey} HTTP ${resp.status}`);
+      return null; // not cached: caller retries on next sync tick
     }
     const data = (await resp.json()) as { result: MoralisTransfer[] };
     const transfers = (data.result || []).filter(t => !t.possible_spam);
-    cache.set(cacheKey, transfers, 300_000); // 5 min
+    cache.set(cacheKey, transfers, 60_000); // sync throttle governs call frequency
     return transfers;
   } catch (err) {
     console.error('[moralis] getTokenTransfers error:', err);
-    cache.set(cacheKey, [], 60_000);
-    return [];
+    return null;
   }
 }
 
@@ -219,7 +217,7 @@ export async function getNativeTransfers(
   chain: string,
   address: string,
   limit = 50
-): Promise<MoralisNativeTx[]> {
+): Promise<MoralisNativeTx[] | null> {
   const mc = moralisChain(chain);
   if (!mc || !apiKey()) return [];
 
@@ -232,16 +230,16 @@ export async function getNativeTransfers(
       `${BASE}/${address}?chain=${mc}&limit=${limit}`
     );
     if (!resp.ok) {
-      cache.set(cacheKey, [], 60_000);
-      return [];
+      console.error(`[moralis] ${cacheKey} HTTP ${resp.status}`);
+      return null; // not cached: caller retries on next sync tick
     }
     const data = (await resp.json()) as { result: MoralisNativeTx[] };
     const txs = data.result || [];
-    cache.set(cacheKey, txs, 300_000); // 5 min
+    cache.set(cacheKey, txs, 60_000); // sync throttle governs call frequency
     return txs;
-  } catch {
-    cache.set(cacheKey, [], 60_000);
-    return [];
+  } catch (err) {
+    console.error('[moralis] getNativeTransfers error:', err);
+    return null;
   }
 }
 
@@ -276,7 +274,7 @@ export async function getWalletHistory(
   chain: string,
   address: string,
   limit = 100
-): Promise<MoralisHistoryItem[]> {
+): Promise<MoralisHistoryItem[] | null> {
   const mc = moralisChain(chain);
   if (!mc || !apiKey()) return [];
 
@@ -289,17 +287,16 @@ export async function getWalletHistory(
       `${BASE}/wallets/${address}/history?chain=${mc}&limit=${limit}`
     );
     if (!resp.ok) {
-      cache.set(cacheKey, [], 60_000);
-      return [];
+      console.error(`[moralis] ${cacheKey} HTTP ${resp.status}`);
+      return null; // not cached: caller retries on next sync tick
     }
     const data = (await resp.json()) as { result: MoralisHistoryItem[] };
     const items = (data.result || []).filter(i => !i.possible_spam);
-    cache.set(cacheKey, items, 300_000); // 5 min
+    cache.set(cacheKey, items, 60_000); // sync throttle governs call frequency
     return items;
   } catch (err) {
     console.error('[moralis] getWalletHistory error:', err);
-    cache.set(cacheKey, [], 60_000);
-    return [];
+    return null;
   }
 }
 

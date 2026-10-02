@@ -32,7 +32,58 @@ export function useTransactions() {
   return useQuery({
     queryKey: ["transactions"],
     queryFn: fetchTransactions,
-    refetchInterval: 120_000,
+    // The backend syncs wallets in the background; this just re-reads its DB.
+    refetchInterval: 60_000,
+  });
+}
+
+// Background sync status / manual refresh
+export interface SyncStatus {
+  running: boolean;
+  startedAt: string | null;
+  lastRunAt: string | null;
+  lastRunMs: number;
+  lastSynced: number;
+  lastFailed: number;
+  lastSkipped: number;
+  failedWallets: string[];
+}
+
+async function fetchSyncStatus(): Promise<SyncStatus> {
+  const res = await apiFetch("/api/transactions/sync-status");
+  if (!res.ok) throw new Error("Failed to fetch sync status");
+  return res.json();
+}
+
+/** Polls quickly while a sync is running, slowly otherwise. */
+export function useSyncStatus() {
+  return useQuery({
+    queryKey: ["syncStatus"],
+    queryFn: fetchSyncStatus,
+    refetchInterval: (query) => (query.state.data?.running ? 2_000 : 30_000),
+  });
+}
+
+/** Forces a sync of every wallet, then refreshes transactions when it finishes. */
+export function useForceSync() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const res = await apiFetch("/api/transactions/sync", { method: "POST" });
+      if (!res.ok) throw new Error("Failed to start sync");
+      // Wait for the run to finish (status is polled every 2s meanwhile).
+      for (let i = 0; i < 150; i++) {
+        await new Promise(r => setTimeout(r, 2_000));
+        const st = await fetchSyncStatus();
+        qc.setQueryData(["syncStatus"], st);
+        if (!st.running) return st;
+      }
+      throw new Error("Sync is taking too long");
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["transactions"] });
+      qc.invalidateQueries({ queryKey: ["syncStatus"] });
+    },
   });
 }
 

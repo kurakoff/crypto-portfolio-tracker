@@ -99,7 +99,9 @@ async function fetchViaTronScan(address: string): Promise<TronResult | null> {
 /** TronGrid fallback — account endpoint + known token metadata */
 async function fetchViaTronGrid(address: string): Promise<TronResult | null> {
   try {
-    const resp = await fetch(`${TRONGRID_API}/v1/accounts/${address}`);
+    const resp = await fetch(`${TRONGRID_API}/v1/accounts/${address}`, {
+      headers: config.tronApiKey ? { 'TRON-PRO-API-KEY': config.tronApiKey } : {},
+    });
     if (!resp.ok) return null;
 
     const accountData = await resp.json() as {
