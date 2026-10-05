@@ -22,17 +22,19 @@ export default function SyncButton() {
     : '';
 
   return (
-    <div className="flex flex-col items-end" title={title}>
+    <div className="relative" title={title}>
       <button
         onClick={() => force.mutate()}
         disabled={running}
-        className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:border-gray-300 transition-colors disabled:opacity-60"
+        className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-600 shadow-sm transition-colors hover:bg-gray-50 disabled:opacity-60"
       >
-        <span className={`inline-block h-3.5 w-3.5 rounded-full border-2 border-blue-600 border-t-transparent ${running ? 'animate-spin' : 'opacity-0 w-0 border-0'}`} />
+        <svg className={`h-4 w-4 ${running ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </svg>
         {running ? 'Syncing…' : 'Refresh'}
       </button>
       {status && !running && (
-        <span className={`mt-0.5 text-[10px] ${failed > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
+        <span className={`absolute right-0 top-full mt-0.5 whitespace-nowrap text-[10px] ${failed > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
           synced {ago(status.lastRunAt)}{failed > 0 ? `, ${failed} failed` : ''}
         </span>
       )}
