@@ -118,7 +118,7 @@ function isDue(wallet: Wallet, now: number): boolean {
  */
 export function syncAllWallets(force = false): Promise<void> {
   if (currentRun) return currentRun;
-  currentRun = (async () => {
+  const run = (async () => {
     status.running = true;
     status.startedAt = new Date().toISOString();
     const t0 = Date.now();
@@ -154,13 +154,18 @@ export function syncAllWallets(force = false): Promise<void> {
       status.lastFailed = failed;
       status.lastSkipped = skipped;
       status.failedWallets = failedWallets;
-      currentRun = null;
       if (synced + failed > 0) {
         console.log(`[sync] done in ${status.lastRunMs}ms: ${synced} synced, ${failed} failed, ${skipped} not due`);
       }
     }
   })();
-  return currentRun;
+  // Clear the slot from a .finally on the outer promise, not inside the run:
+  // when every wallet is skipped the run never awaits, so its own finally would
+  // execute before `currentRun` is assigned and leave a settled promise in it
+  // forever, silently stopping all future syncs.
+  currentRun = run;
+  void run.finally(() => { if (currentRun === run) currentRun = null; });
+  return run;
 }
 
 /** Kick off the periodic background sync. Call once at startup. */
