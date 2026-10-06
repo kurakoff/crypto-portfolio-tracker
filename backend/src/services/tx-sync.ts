@@ -174,8 +174,11 @@ export function syncAllWallets(force = false): Promise<void> {
       status.lastFailed = failed;
       status.lastSkipped = skipped;
       status.failedWallets = failedWallets;
+      history.push({ at: status.lastRunAt, ms: status.lastRunMs, forced: force, synced, failed, skipped, newTxs: runNewTxs, failedWallets });
+      if (history.length > HISTORY_MAX) history.splice(0, history.length - HISTORY_MAX);
       if (synced + failed > 0) {
-        console.log(`[sync] done in ${status.lastRunMs}ms: ${synced} synced, ${failed} failed, ${skipped} not due`);
+        const added = Object.entries(runNewTxs).map(([c, n]) => `${c}:+${n}`).join(' ') || 'no new txs';
+        console.log(`[sync] done in ${status.lastRunMs}ms: ${synced} synced, ${failed} failed, ${skipped} not due, ${added}`);
       }
     }
   })();
@@ -717,7 +720,7 @@ async function syncLegacyTransactions(wallet: Wallet): Promise<boolean> {
   return true;
 }
 
-function insertTransactions(walletId: number, txs: TxRecord[]): void {
+function insertTransactions(walletId: number, txs: TxRecord[]): number {
   const insert = db.prepare(`
     INSERT INTO transactions
       (wallet_id, hash, block_number, timestamp, from_address, to_address, value, token_symbol, token_address, type, value_usd, fee_native, fee_usd)
@@ -736,6 +739,14 @@ function insertTransactions(walletId: number, txs: TxRecord[]): void {
       );
     }
   });
-
+  const countRows = db.prepare('SELECT COUNT(*) AS c FROM transactions WHERE wallet_id = ?');
+  const before = (countRows.get(walletId) as { c: number }).c;
   batchInsert(txs);
+  const added = (countRows.get(walletId) as { c: number }).c - before;
+  if (added > 0) {
+    const chain = (db.prepare('SELECT chain FROM wallets WHERE id = ?').get(walletId) as { chain: string } | undefined)?.chain || '?';
+    runNewTxs[chain] = (runNewTxs[chain] || 0) + added;
+    console.log(`[sync] wallet ${walletId} (${chain}): +${added} new tx(s)`);
+  }
+  return added;
 }

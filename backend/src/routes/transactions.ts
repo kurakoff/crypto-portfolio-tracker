@@ -4,7 +4,8 @@ import { getTronTxFees, getEthBlockscoutTxFees } from '../services/explorer';
 import { getNativePrice } from '../services/prices';
 import { getTransactionFees, checkMoralisKeys } from '../services/moralis';
 import { checkNodeReal } from '../services/nodereal';
-import { syncAllWallets, getSyncStatus, NATIVE_COIN_IDS } from '../services/tx-sync';
+import { syncAllWallets, getSyncStatus, getSyncHistory, NATIVE_COIN_IDS } from '../services/tx-sync';
+import { invalidatePortfolioCache } from './wallets';
 
 const router = Router();
 
@@ -12,8 +13,15 @@ const router = Router();
 // Returns immediately; poll GET /sync-status until running=false, then refetch.
 router.post('/sync', (_req: Request, res: Response) => {
   const before = getSyncStatus();
-  void syncAllWallets(true);
+  // After a forced run, drop the 5-minute portfolio cache so balances the run
+  // refreshed (BSC snapshots, live ETH/Tron reads) show up right away.
+  void syncAllWallets(true).then(() => invalidatePortfolioCache());
   res.status(202).json({ started: !before.running, ...getSyncStatus() });
+});
+
+// GET /api/transactions/sync-history — recent background runs, newest first
+router.get('/sync-history', (_req: Request, res: Response) => {
+  res.json(getSyncHistory());
 });
 
 // GET /api/transactions/moralis-check — probe each configured Moralis key

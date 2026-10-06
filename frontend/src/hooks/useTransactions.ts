@@ -83,6 +83,7 @@ export function useForceSync() {
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ["transactions"] });
       qc.invalidateQueries({ queryKey: ["syncStatus"] });
+      qc.invalidateQueries({ queryKey: ["portfolio"] });
     },
   });
 }

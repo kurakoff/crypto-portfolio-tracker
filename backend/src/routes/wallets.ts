@@ -5,7 +5,7 @@ import { cache } from '../cache/memory-cache';
 
 const router = Router();
 
-function invalidatePortfolioCache() {
+export function invalidatePortfolioCache() {
   cache.delete('portfolio:all');
 }
 
