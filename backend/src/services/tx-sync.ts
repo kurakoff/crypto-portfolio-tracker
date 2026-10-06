@@ -100,8 +100,27 @@ const status: SyncStatus = {
 const lastFailedAt = new Map<number, number>();
 let currentRun: Promise<void> | null = null;
 
+/** Ring buffer of recent runs so "when did X stop updating" can be answered. */
+export interface SyncRunRecord {
+  at: string;
+  ms: number;
+  forced: boolean;
+  synced: number;
+  failed: number;
+  skipped: number;
+  newTxs: Record<string, number>;   // chain -> rows inserted
+  failedWallets: string[];
+}
+const history: SyncRunRecord[] = [];
+const HISTORY_MAX = 300; // ~5h at one tick per minute
+let runNewTxs: Record<string, number> = {};
+
 export function getSyncStatus(): SyncStatus {
   return { ...status, failedWallets: [...status.failedWallets] };
+}
+
+export function getSyncHistory(): SyncRunRecord[] {
+  return history.slice().reverse();
 }
 
 function isDue(wallet: Wallet, now: number): boolean {
@@ -124,6 +143,7 @@ export function syncAllWallets(force = false): Promise<void> {
     const t0 = Date.now();
     let synced = 0, failed = 0, skipped = 0;
     const failedWallets: string[] = [];
+    runNewTxs = {};
 
     try {
       const wallets = db.prepare('SELECT * FROM wallets').all() as Wallet[];
